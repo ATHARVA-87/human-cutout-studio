@@ -21,6 +21,8 @@ The editor preview above is captured from the local frontend. The extracted pers
 
 The source dataset must have matching `images/` and `masks/` filenames. The preparation command validates all pairs, excludes collages by reading only those two directories, converts source images to RGB, converts masks to grayscale binary (`0` background, `255` person), and writes 256×256 files. Images use bilinear interpolation; masks use nearest-neighbour interpolation.
 
+**Data Source:** [Supervisely Filtered Segmentation Person Dataset](https://www.kaggle.com/datasets/tapakah68/supervisely-filtered-segmentation-person-dataset)
+
 The deterministic split is 80% train / 10% validation / 10% test: for 2,667 pairs, that is 2,133 / 266 / 268 samples.
 
 ## Why 256×256
