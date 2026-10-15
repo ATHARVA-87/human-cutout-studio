@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+data/raw/
+data/processed/
+backend/weights/*.pth
+!backend/weights/.gitkeep
+outputs/
+uploads/
+.env
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
