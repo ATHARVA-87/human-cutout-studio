@@ -30,8 +30,13 @@ class StoredArtifacts:
     cutout_path: str
 
 
-def decode_image(contents: bytes) -> Image.Image:
-    """Decode bytes into an RGB image, accepting only real JPEG/PNG files of a sane size."""
+def decode_image(contents: bytes, max_side: int | None = None) -> Image.Image:
+    """Decode bytes into an RGB image, accepting only real JPEG/PNG files of a sane size.
+
+    Images are shrunk so the longest side is at most `max_side` pixels. A 12-megapixel phone photo
+    would otherwise need about 1 GB of RAM to process, far over the free server's 512 MB.
+    """
+    max_side = max_side or settings.max_image_side
     try:
         image = Image.open(io.BytesIO(contents))
         if image.format not in ALLOWED_FORMATS:
@@ -40,8 +45,10 @@ def decode_image(contents: bytes) -> Image.Image:
         image = Image.open(io.BytesIO(contents))  # verify() consumes the image, so open again
         if image.width * image.height > MAX_PIXELS:
             raise ValueError("Image has more than 40 megapixels.")
-        image.load()
-        return image.convert("RGB")
+        image.draft("RGB", (max_side, max_side))  # JPEG only: decode directly at a smaller size (saves memory)
+        image = image.convert("RGB")
+        image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)  # keeps the aspect ratio
+        return image
     except (OSError, ValueError, Image.DecompressionBombError) as error:
         raise ValueError("Invalid or unsupported image upload.") from error
 

@@ -2,22 +2,16 @@
 
 from __future__ import annotations
 
-import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import SQLAlchemyError
 
-# Lets `uvicorn backend.app.main:app` import the `segmentation` package from src/ without installing it.
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
-
-from backend.app.api import auth, compositions, health, predictions  # noqa: E402
-from backend.app.core.config import settings  # noqa: E402
-from backend.app.db.session import create_tables  # noqa: E402
-from backend.app.services.inference import SegmentationService  # noqa: E402
+from backend.app.api import auth, compositions, health, predictions
+from backend.app.core.config import settings
+from backend.app.db.session import create_tables
+from backend.app.services.inference import SegmentationService
 
 
 @asynccontextmanager
@@ -31,7 +25,7 @@ async def lifespan(app: FastAPI):
         # Keep starting so /api/health can report the problem instead of the server crashing.
         app.state.database_error = str(error).splitlines()[0]
     try:
-        service = SegmentationService(settings.checkpoint_path, threads=settings.torch_threads)
+        service = SegmentationService(settings.model_path, threads=settings.model_threads)
         service.load()
         app.state.segmentation, app.state.model_error = service, None
     except (FileNotFoundError, ValueError, RuntimeError) as error:

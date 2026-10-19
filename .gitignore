@@ -6,6 +6,7 @@ __pycache__/
 data/raw/
 data/processed/
 backend/weights/*.pth
+backend/weights/*.onnx
 !backend/weights/.gitkeep
 outputs/
 uploads/

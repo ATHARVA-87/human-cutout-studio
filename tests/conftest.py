@@ -10,4 +10,4 @@ import tempfile
 
 os.environ.setdefault("SEGMENTATION_DATABASE_URL", "postgresql+psycopg://segmentation:segmentation@localhost:5432/segmentation_test")
 os.environ["SEGMENTATION_STORAGE_DIR"] = tempfile.mkdtemp(prefix="human-cutout-test-")
-os.environ["SEGMENTATION_CHECKPOINT_PATH"] = "does-not-exist.pth"  # tests use a fake model instead
+os.environ["SEGMENTATION_MODEL_PATH"] = "does-not-exist.onnx"  # API tests use a fake model instead

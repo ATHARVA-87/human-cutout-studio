@@ -25,6 +25,14 @@ def test_other_image_formats_are_rejected_even_if_valid(format_name: str) -> Non
         decode_image(encode(format_name))
 
 
+@pytest.mark.parametrize("format_name", ["PNG", "JPEG"])
+def test_large_images_are_shrunk_keeping_aspect_ratio(format_name: str) -> None:
+    buffer = io.BytesIO()
+    Image.new("RGB", (4000, 3000), 128).save(buffer, format=format_name)
+    image = decode_image(buffer.getvalue(), max_side=1600)
+    assert image.size == (1600, 1200)
+
+
 def test_non_image_bytes_are_rejected() -> None:
     with pytest.raises(ValueError, match="Invalid or unsupported"):
         decode_image(b"not an image")

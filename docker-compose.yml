@@ -21,7 +21,7 @@ services:
     build:
       context: .
       args:
-        MODEL_URL: ${MODEL_URL:-} # only used when backend/weights/model.pth does not exist
+        MODEL_URL: ${MODEL_URL:-} # only used when backend/weights/model.onnx does not exist
     depends_on:
       db:
         condition: service_healthy
