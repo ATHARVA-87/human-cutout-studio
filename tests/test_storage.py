@@ -33,6 +33,23 @@ def test_large_images_are_shrunk_keeping_aspect_ratio(format_name: str) -> None:
     assert image.size == (1600, 1200)
 
 
+def test_phone_photo_rotation_tag_is_applied() -> None:
+    """Phones save portraits as landscape pixels + EXIF Orientation=6 ('rotate 90°'). We must apply it."""
+    exif = Image.Exif()
+    exif[0x0112] = 6  # Orientation tag
+    buffer = io.BytesIO()
+    Image.new("RGB", (400, 300), 128).save(buffer, format="JPEG", exif=exif)
+    assert decode_image(buffer.getvalue()).size == (300, 400)  # upright, as the browser shows it
+
+
+def test_multi_picture_jpeg_from_phones_is_accepted() -> None:
+    """Pillow calls JPEGs with an embedded second image (HDR/portrait photos) 'MPO'."""
+    buffer = io.BytesIO()
+    Image.new("RGB", (40, 30), 100).save(buffer, format="MPO", save_all=True, append_images=[Image.new("RGB", (40, 30), 50)])
+    assert Image.open(io.BytesIO(buffer.getvalue())).format == "MPO"
+    assert decode_image(buffer.getvalue()).size == (40, 30)
+
+
 def test_non_image_bytes_are_rejected() -> None:
     with pytest.raises(ValueError, match="Invalid or unsupported"):
         decode_image(b"not an image")

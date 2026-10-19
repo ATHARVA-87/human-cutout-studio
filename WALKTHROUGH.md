@@ -217,7 +217,7 @@ After all decisions were final, I ran the 268 test images once: **global Dice 0.
 
 ### 7.1 Startup ([backend/app/main.py](backend/app/main.py))
 - `lifespan` runs once: it creates the `uploads/` folder, creates missing tables (`create_all`), and loads `model.onnx`.
-- If the DB or model fails, the server still starts, and `/api/health` reports what is wrong. The hosting platform uses `/api/health` to decide whether a deploy is healthy.
+- If the DB or model fails, the server still starts, and `/api/health` reports what is wrong **with HTTP 503**. Render looks only at the status code: a deploy whose health check doesn't return 200 never replaces the working version.
 - Routes are mounted under `/api`, generated images at `/media`, and **the built React app at `/`**. One origin means no CORS configuration and cookies just work.
 
 ### 7.2 Settings ([backend/app/core/config.py](backend/app/core/config.py))
@@ -226,7 +226,7 @@ After all decisions were final, I ran the 268 test images once: **global Dice 0.
 
 ### 7.3 Passwords and sessions ([services/auth.py](backend/app/services/auth.py), [api/auth.py](backend/app/api/auth.py))
 - **Password storage:** `pbkdf2_sha256$<salt>$<hash>` with 600,000 rounds and a random 16-byte salt per user. Slow on purpose, so a stolen database is expensive to crack. Verification uses `hmac.compare_digest`, a constant-time comparison.
-- **Login errors:** login says "Invalid email or password" for both wrong email and wrong password, so attackers can't find out which emails have accounts.
+- **Login errors:** login says "Invalid email or password" for both wrong email and wrong password. For an unknown email it still runs one PBKDF2 check against a dummy hash (`check_login`), so the response time doesn't reveal which emails have accounts. Honest limit: sign-up answers 409 "already exists", which does reveal taken emails; that's the usual trade-off for a clear sign-up form.
 - **Session token:** `secrets.token_urlsafe(32)` (256 random bits) goes to the browser in an **HttpOnly, SameSite=Lax** cookie (also **Secure** in production). The database stores only its **SHA-256 hash**, so a leaked database can't be used to log in.
 - **One session per user:** `session_tokens.user_id` is **UNIQUE**. Login runs `INSERT … ON CONFLICT (user_id) DO UPDATE SET token_hash = …`, which replaces the old row. The old browser's token no longer matches anything, so it gets 401 "your session ended (expired or you signed in elsewhere)". Newest login wins, and the database guarantees it even if two logins race.
 - **Logout:** deletes the row for this cookie and clears the cookie. It works even if the session already expired.
@@ -257,12 +257,16 @@ After all decisions were final, I ran the 268 test images once: **global Dice 0.
   - size;
   - Pillow `verify()` plus the **actual format must be JPEG/PNG**, because the content type comes from the browser and can be faked. A test uploads WebP bytes named `photo.png`.
   - a 40 MP limit (decompression bombs);
+  - apply the **EXIF orientation** tag (phones store portraits sideways plus a "rotate me" tag);
   - shrink to ≤ 1600 px (§11).
+- Phone JPEGs that contain a second embedded picture (HDR/portrait shots) are reported by Pillow as **MPO**; they're accepted as JPEGs.
+- The upload is read with `upload.read(limit + 1)`, so a 1 GB file is rejected without loading it all into RAM. Decoding runs in a worker thread.
 - **Storage:** files go to `uploads/<uuid4>/`. A random folder name means URLs can't be guessed and jobs never collide.
 
 ### 7.7 Inference without blocking ([services/jobs.py](backend/app/services/jobs.py), [services/inference.py](backend/app/services/inference.py))
 - The routes are `async def`. Calling a 1-second CPU function directly would freeze the event loop, and **every other user** would wait. `run_in_threadpool` runs it on a worker thread instead.
 - A `threading.Lock` lets one image use the model at a time, which keeps memory predictable on a 512 MB server. ONNX Runtime uses 1 thread to match the free tier's 0.1 CPU.
+- Plain `def` dependencies such as `current_user` already run in FastAPI's thread pool. The short rate-limit/credit queries inside the `async` route still run on the event loop; they take milliseconds. A fully async version would use an async database driver, which wasn't worth the extra complexity here.
 
 ---
 
@@ -400,7 +404,7 @@ The free server has **512 MB RAM and 0.1 CPU**. I measured inside the production
 - `docker compose up --build` runs the full app at http://localhost:8000.
 
 **[.github/workflows/ci.yml](.github/workflows/ci.yml)** runs on every push and PR:
-- **backend:** Python 3.11, CPU PyTorch + `.[dev]`, a `postgres:16` **service container**, then `pytest`.
+- **backend:** Python 3.11, CPU PyTorch + `.[dev]`, a `postgres:16-alpine` **service container**, then `pytest`. If the database isn't reachable in CI, the API tests **fail** instead of skipping, so a broken setup can't produce a green check (and an automatic deploy).
 - **frontend:** `npm ci && npm run build`, which includes the `tsc` type-check.
 
 **Tests** ([tests/](tests)):
@@ -413,7 +417,7 @@ The free server has **512 MB RAM and 0.1 CPU**. I measured inside the production
   - the 11th request → 429;
   - 0 credits → 402 without using a token, then recharge;
   - composition + half-body detection, refund on failure.
-- `conftest.py` sets environment variables *before* the app is imported, so tests never touch the dev database.
+- `conftest.py` sets environment variables *before* the app is imported, so tests never touch the dev database. It also refuses to run unless the test database's name ends in `_test`, so an exported production URL can't be wiped by a test run.
 
 **[render.yaml](render.yaml)** is a Render Blueprint:
 - one Docker web service on the free plan in Singapore;
@@ -484,6 +488,8 @@ At real scale, I'd also move inference to a **job queue** (SQS + worker containe
 
 ## 14. What changed in this round (before → after)
 
+Numbers follow my original issue list (it had no item 8).
+
 | # | Problem (before) | Root cause | Fix (after) |
 | --- | --- | --- | --- |
 | 1 | Empty password showed "[object Object]" | FastAPI 422 `detail` is a list; the client did `new Error(list)` | Client turns field errors into text; the form checks email/password before sending; Enter submits |
@@ -517,12 +523,29 @@ At real scale, I'd also move inference to a **job queue** (SQS + worker containe
 | Installing `onnx` broke `wandb` in my conda env (protobuf version clash) | Use `onnx==1.17` with `protobuf==4.25.8`, which satisfies both |
 | My first fix stored `user.credits = new_value` after commit | That marks the row dirty, so a later commit could overwrite a parallel charge. Use `session.expire` instead |
 | Pillow's LAB a/b values looked wrong | They are signed bytes stored as unsigned; unwrap values above 127 |
+| `git rm -r` of a folder was blocked by my tool's safety check | Removed the two tracked files individually; git history keeps them anyway |
 
 ---
 
 ## 16. What the code review caught
 
-_To be filled in after the independent review._
+After the changes were done, an independent reviewer (a fresh agent with no context) read the whole diff. It confirmed the core logic was correct: the conditional credit UPDATE, row-lock scope, session upsert, cookie flags, CSRF/CORS reasoning, `/media` path safety, LAB unwrapping and canvas maths. It also found these real problems, all fixed and covered by tests:
+
+| Severity | Finding | Fix |
+| --- | --- | --- |
+| High | Phone portraits came out **sideways**: the EXIF orientation tag was ignored | `ImageOps.exif_transpose` in `decode_image` |
+| High | Many phone JPEGs (HDR/portrait, with an embedded second picture) were **rejected** because Pillow calls them "MPO" | Accept `MPO` as JPEG |
+| Medium | `upload.read()` loaded the whole file before the 10 MB check: a 1 GB upload could crash the 512 MB server | `upload.read(limit + 1)` |
+| Medium | `/api/health` always returned 200, so Render would accept a broken deploy; a corrupt model file crashed startup | 503 when degraded; catch any model-load error |
+| Medium-low | Image decoding still ran on the event loop | Decode in `run_in_threadpool` |
+| Medium-low | CI could pass with the API tests silently skipped; a shell-exported production URL could be used by tests | Fail in CI; require a `_test` database name |
+| Low-medium | `db_admin.py reset` used paths relative to the current folder | Always work from the project root, show the folder, refuse paths outside the project, `--yes` only for localhost |
+| Low | Code needs Python 3.11 (`datetime.UTC`), docs said 3.10 | Require 3.11 |
+| Low | Newer PyTorch changes the default ONNX exporter | `dynamo=False`, `torch>=2.5` |
+| Low | UI: Recharge during a running job re-enabled "Continue"; stale credits after 402; blank editor if images failed to load | Disable header actions while busy; functional state updates; reload balance; show an error |
+| Low | Docs claimed accounts couldn't be discovered | Constant-time login for unknown emails; docs now state the sign-up 409 trade-off |
+
+Lesson for interviews: tests passed before the review too. These were edge cases from **real-world inputs** (phone photos), **resource limits** (a huge upload on a small server) and **operations** (what a health check is for). That's why review matters even when tests are green.
 
 ---
 
@@ -534,6 +557,7 @@ _To be filled in after the independent review._
 - **Images on the free tier are temporary;** in production, use S3 with presigned URLs.
 - **`/media` URLs** are unguessable but not access-checked; S3 presigned URLs fix this too.
 - **Sign-up abuse:** anyone can create many accounts for free credits. Add email verification, CAPTCHA, or a per-IP sign-up limit.
+- **Login has no rate limit:** PBKDF2 costs ~0.1 s of CPU per attempt (~1 s on the free 0.1 CPU), so login spam could slow the server. Add a per-IP/per-email login limiter.
 - **No migrations:** add Alembic before real users.
 - **Realism:** no perspective or light-direction matching.
 - **Accessibility:** the editor needs a keyboard way to move the person.

@@ -41,6 +41,7 @@ def export_to_onnx(model: nn.Module, spec: CheckpointSpec, output: Path) -> None
         input_names=["image"],
         output_names=["logits"],
         opset_version=17,
+        dynamo=False,  # the classic exporter; newer PyTorch defaults to a different one that needs extra packages
     )
     # Attach the preprocessing contract as metadata so the file is self-describing.
     graph = onnx.load(str(output))

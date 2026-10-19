@@ -34,6 +34,18 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(hash_password(password, bytes.fromhex(salt)), stored)
 
 
+# Checked against when the email does not exist, so "unknown email" takes as long as "wrong password"
+# and response time does not reveal which emails have accounts.
+_DUMMY_HASH = hash_password("not-a-real-password")
+
+
+def check_login(user: User | None, password: str) -> bool:
+    if user is None:
+        verify_password(password, _DUMMY_HASH)
+        return False
+    return verify_password(password, user.password_hash)
+
+
 def hash_token(token: str) -> str:
     """Only a SHA-256 of the session token is stored, so a leaked database cannot be used to log in."""
     return hashlib.sha256(token.encode()).hexdigest()

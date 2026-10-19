@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
         service = SegmentationService(settings.model_path, threads=settings.model_threads)
         service.load()
         app.state.segmentation, app.state.model_error = service, None
-    except (FileNotFoundError, ValueError, RuntimeError) as error:
+    except Exception as error:  # missing or corrupt model.onnx: start anyway and report it in /api/health
         app.state.segmentation, app.state.model_error = None, str(error)
     yield
 

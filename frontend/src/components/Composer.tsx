@@ -38,6 +38,7 @@ export function Composer({ item }: { item: Composition }) {
   const [images, setImages] = useState<LoadedImages>();
   const [place, setPlace] = useState<Placement>();
   const [mirrored, setMirrored] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
   // While dragging: the distance between the pointer and the person's feet, so the person
   // does not jump to the cursor; it moves exactly as far as the mouse moves.
   const grab = useRef<{ dx: number; dy: number } | null>(null);
@@ -45,12 +46,15 @@ export function Composer({ item }: { item: Composition }) {
   // 1) Load both images once per composition.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadImage(item.background_url), loadImage(item.cutout_url)]).then(([background, cutout]) => {
-      if (cancelled) return;
-      setImages({ background, cutout });
-      setPlace(initialPlacement({ background, cutout }, item.anchor_bottom));
-      setMirrored(false);
-    });
+    setLoadError(undefined);
+    Promise.all([loadImage(item.background_url), loadImage(item.cutout_url)])
+      .then(([background, cutout]) => {
+        if (cancelled) return;
+        setImages({ background, cutout });
+        setPlace(initialPlacement({ background, cutout }, item.anchor_bottom));
+        setMirrored(false);
+      })
+      .catch(() => !cancelled && setLoadError("The images could not be loaded (the free server may have restarted). Please create the composition again."));
     return () => {
       cancelled = true;
     };
@@ -169,6 +173,7 @@ export function Composer({ item }: { item: Composition }) {
           onPointerCancel={stopDragging}
         />
       </div>
+      {loadError && <p className="notice">{loadError}</p>}
       <label className="size-control">
         Size {sizePercent}%
         <input

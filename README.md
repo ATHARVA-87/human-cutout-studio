@@ -55,7 +55,7 @@ Training happens offline in PyTorch on a GPU (`src/segmentation`, `scripts/`). T
 
 ## Run it locally
 
-You need Docker. To develop, you also need Python 3.10+ and Node 22.
+You need Docker. To develop, you also need Python 3.11+ and Node 22.
 
 **Option A: everything in Docker (same as production)**
 

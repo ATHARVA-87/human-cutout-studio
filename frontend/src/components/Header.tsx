@@ -3,12 +3,13 @@ import type { Account } from "../types";
 interface HeaderProps {
   user?: Account;
   dark: boolean;
+  busy?: boolean; // a job is running: block actions that would interfere
   onToggleTheme: () => void;
   onRecharge?: () => void;
   onLogout?: () => void;
 }
 
-export function Header({ user, dark, onToggleTheme, onRecharge, onLogout }: HeaderProps) {
+export function Header({ user, dark, busy = false, onToggleTheme, onRecharge, onLogout }: HeaderProps) {
   return (
     <header>
       <span className="brand">
@@ -17,7 +18,7 @@ export function Header({ user, dark, onToggleTheme, onRecharge, onLogout }: Head
       <div className="top-actions">
         {user && <strong className="credits">{user.credits} credits</strong>}
         {user && (
-          <button className="plain" onClick={onRecharge}>
+          <button className="plain" onClick={onRecharge} disabled={busy}>
             Recharge
           </button>
         )}
@@ -25,7 +26,7 @@ export function Header({ user, dark, onToggleTheme, onRecharge, onLogout }: Head
           {dark ? "☀" : "☾"}
         </button>
         {user && (
-          <button className="plain" onClick={onLogout}>
+          <button className="plain" onClick={onLogout} disabled={busy}>
             Log out
           </button>
         )}

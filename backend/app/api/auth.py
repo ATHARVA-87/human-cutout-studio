@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from backend.app.db.models import CreditTransaction, User
 from backend.app.db.session import get_session
 from backend.app.schemas import Account, Credentials
-from backend.app.services.auth import current_user, end_session, hash_password, start_session, verify_password
+from backend.app.services.auth import check_login, current_user, end_session, hash_password, start_session
 from backend.app.services.credits import recharge as recharge_credits
 from backend.app.services.jobs import COMPOSE_COST, RECHARGE_AMOUNT
 from backend.app.services.rate_limit import new_bucket
@@ -43,8 +43,9 @@ def register(body: Credentials, response: Response, session: Session = Depends(g
 @router.post("/login", response_model=Account)
 def login(body: Credentials, response: Response, session: Session = Depends(get_session)) -> Account:
     user = session.scalar(select(User).where(User.email == body.email.lower()))
-    # Same message for "no such email" and "wrong password", so attackers cannot discover accounts.
-    if user is None or not verify_password(body.password, user.password_hash):
+    # Same message and same timing for "no such email" and "wrong password".
+    # (Registration still reveals taken emails with 409; that is the usual trade-off for a clear sign-up form.)
+    if not check_login(user, body.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
     start_session(session, response, user)  # replaces any session on another device
     return to_account(user)

@@ -13,12 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
-from PIL import Image
+from fastapi.concurrency import run_in_threadpool
+from PIL import Image, ImageOps
 
 from backend.app.core.config import settings
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png"}
-ALLOWED_FORMATS = {"JPEG", "PNG"}
+# Pillow reports many phone JPEGs (HDR / portrait photos with an embedded second image) as "MPO".
+ALLOWED_FORMATS = {"JPEG", "MPO", "PNG"}
 MAX_PIXELS = 40_000_000
 
 
@@ -46,6 +48,8 @@ def decode_image(contents: bytes, max_side: int | None = None) -> Image.Image:
         if image.width * image.height > MAX_PIXELS:
             raise ValueError("Image has more than 40 megapixels.")
         image.draft("RGB", (max_side, max_side))  # JPEG only: decode directly at a smaller size (saves memory)
+        # Phones store portraits sideways plus an EXIF "rotate me" tag; apply it so people are upright.
+        image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
         image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)  # keeps the aspect ratio
         return image
@@ -59,11 +63,13 @@ async def read_image(upload: UploadFile) -> Image.Image:
     # actual file bytes, because the content type is chosen by the client and can be faked.
     if upload.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Only JPG and PNG images are supported.")
-    contents = await upload.read()
+    # Read at most limit + 1 bytes: a huge upload is rejected without loading it all into memory.
+    contents = await upload.read(settings.max_upload_bytes + 1)
     if not contents or len(contents) > settings.max_upload_bytes:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"Images must be smaller than {settings.max_upload_bytes // (1024 * 1024)} MB.")
+        raise HTTPException(413, f"Images must be smaller than {settings.max_upload_bytes // (1024 * 1024)} MB.")
     try:
-        return decode_image(contents)
+        # Decoding and resizing are CPU work: run them in a worker thread so the server stays responsive.
+        return await run_in_threadpool(decode_image, contents)
     except ValueError as error:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "The file is not a valid JPG or PNG image.") from error
 

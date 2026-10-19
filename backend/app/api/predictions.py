@@ -80,7 +80,7 @@ async def create_prediction(
 @router.get("", response_model=PredictionListResponse)
 def list_predictions(limit: int = 20, offset: int = 0, session: Session = Depends(get_session), user: User = Depends(current_user)) -> PredictionListResponse:
     if not 1 <= limit <= 100 or offset < 0:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "limit must be 1-100 and offset must be 0 or more.")
+        raise HTTPException(422, "limit must be 1-100 and offset must be 0 or more.")
     items = session.scalars(
         select(Prediction).where(Prediction.user_id == user.id).order_by(Prediction.created_at.desc()).offset(offset).limit(limit)
     ).all()

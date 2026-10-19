@@ -6,6 +6,7 @@ Skipped automatically when PostgreSQL is not running (start it with `docker comp
 from __future__ import annotations
 
 import io
+import os
 import uuid
 
 import pytest
@@ -32,7 +33,10 @@ def ensure_test_database() -> bool:
 
 
 if not ensure_test_database():
-    pytest.skip("PostgreSQL is not reachable; start it with `docker compose up db -d`.", allow_module_level=True)
+    message = "PostgreSQL is not reachable; start it with `docker compose up db -d`."
+    if os.environ.get("CI"):  # GitHub Actions sets CI=true: there, a missing database is an error, not a skip
+        raise RuntimeError(message)
+    pytest.skip(message, allow_module_level=True)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -153,6 +157,24 @@ def test_only_jpg_and_png_are_accepted(client) -> None:
     disguised = browser.post("/api/predictions", files={"image": image_file("WEBP", "photo.png", "image/png")})
     assert disguised.status_code == 415  # the real file format is checked, not just the declared type
     assert browser.get("/api/auth/me").json()["credits"] == 30
+
+
+def test_too_large_upload_is_rejected_before_charging(client, monkeypatch) -> None:
+    browser, _ = new_user(client)
+    monkeypatch.setattr(settings, "max_upload_bytes", 100)  # anything bigger than 100 bytes is "too large"
+    assert browser.post("/api/predictions", files={"image": image_file()}).status_code == 413
+    assert browser.get("/api/auth/me").json()["credits"] == 30
+
+
+def test_health_reports_ok_with_status_200_and_503_when_degraded(client) -> None:
+    app.state.model_error = None
+    assert client.get("/api/health").status_code == 200
+    app.state.model_error = "model missing"
+    try:
+        response = client.get("/api/health")
+    finally:
+        app.state.model_error = None
+    assert response.status_code == 503 and response.json()["status"] == "degraded"
 
 
 def test_rate_limit_allows_ten_jobs_then_returns_429(client) -> None:

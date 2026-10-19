@@ -12,12 +12,15 @@ string (your local .env, or the Neon URL for production). Having that secret is 
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
+# Work from the project folder, so .env and uploads/ mean the same thing wherever the script is started.
+os.chdir(PROJECT_ROOT)
 
 from sqlalchemy import inspect, text  # noqa: E402
 
@@ -42,9 +45,27 @@ def stats() -> None:
             print(f"  {table:<22} {rows:>8} rows")
 
 
+LOCAL_HOSTS = {"localhost", "127.0.0.1"}
+
+
+def local_uploads_folder() -> Path | None:
+    """The uploads folder to empty, only for a local database and only if it is inside the project."""
+    if engine.url.host not in LOCAL_HOSTS:
+        return None  # production images live on the Render server, not on this computer
+    folder = settings.storage_dir.resolve()
+    if folder == PROJECT_ROOT or PROJECT_ROOT not in folder.parents:
+        raise SystemExit(f"Refusing to empty {folder}: it must be a folder inside {PROJECT_ROOT}.")
+    return folder
+
+
 def reset(skip_confirmation: bool) -> int:
     target = engine.url
+    folder = local_uploads_folder()
     print(f"Database: {target.render_as_string(hide_password=True)}")
+    if folder:
+        print(f"Files:    everything inside {folder}")
+    if skip_confirmation and target.host not in LOCAL_HOSTS:
+        raise SystemExit("--yes is only allowed for a local database. Type the confirmation for production.")
     if not skip_confirmation:
         typed = input(f"This deletes ALL users, sessions, credits and history. Type the database name ({target.database}) to confirm: ")
         if typed.strip() != target.database:
@@ -58,10 +79,10 @@ def reset(skip_confirmation: bool) -> int:
 
     # Generated images live on the app server's disk. From your laptop only the local folder can be
     # cleared; on Render the disk is temporary and is wiped on every restart anyway.
-    if target.host in {"localhost", "127.0.0.1"} and settings.storage_dir.is_dir():
-        for child in settings.storage_dir.iterdir():
+    if folder and folder.is_dir():
+        for child in folder.iterdir():
             shutil.rmtree(child) if child.is_dir() else child.unlink()
-        print(f"Cleared local files in {settings.storage_dir}/")
+        print(f"Cleared local files in {folder}")
     return 0
 
 

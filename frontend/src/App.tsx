@@ -68,6 +68,7 @@ export default function App() {
       setUser(undefined);
       setNotice(caught.message); // e.g. signed in on another device
     } else if (caught instanceof ApiError && caught.status === 402) {
+      api.me().then(setUser).catch(() => undefined); // show the real balance in the dialog
       setRechargeOpen(true);
     } else {
       setError(caught instanceof Error ? caught.message : "Something went wrong.");
@@ -84,12 +85,13 @@ export default function App() {
         const prediction = await api.segment(person);
         setResult(prediction);
         setComposition(undefined);
-        if (prediction.credits !== null) setUser({ ...user, credits: prediction.credits });
+        const credits = prediction.credits;
+        if (credits !== null) setUser((current) => current && { ...current, credits });
       } else {
         const created = await api.compose(person, background!);
         setComposition(created);
         setResult(undefined);
-        setUser({ ...user, credits: created.credits });
+        setUser((current) => current && { ...current, credits: created.credits });
       }
     } catch (caught) {
       handleError(caught);
@@ -123,6 +125,7 @@ export default function App() {
     <Header
       user={user}
       dark={dark}
+      busy={busy}
       onToggleTheme={() => setDark((value) => !value)}
       onRecharge={() => void recharge()} // the server decides whether a recharge is allowed
       onLogout={logout}
