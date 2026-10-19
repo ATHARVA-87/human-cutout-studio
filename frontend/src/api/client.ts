@@ -1,27 +1,57 @@
-import type { Account, Capability, Composition, Prediction } from "../types";
+import type { Account, Composition, Prediction } from "../types";
 
-const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
+/** An error from the backend, keeping the HTTP status so the UI can react (401 -> login, 402 -> recharge). */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+/** FastAPI sends `detail` as a string, or as a list of field errors for 422 validation failures. */
+function readableDetail(detail: unknown, status: number): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        const field = Array.isArray(item?.loc) ? item.loc[item.loc.length - 1] : undefined;
+        const message = typeof item?.msg === "string" ? item.msg : "is invalid";
+        return field ? `${field}: ${message}` : message;
+      })
+      .join(" ");
+  }
+  return `Request failed (${status}).`;
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, { credentials: "include", ...options });
+  // Same origin in development (Vite proxy) and production (FastAPI serves the app), so the cookie is sent automatically.
+  const response = await fetch(path, { credentials: "same-origin", ...options });
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { detail?: string } | null;
-    throw new Error(payload?.detail ?? `Request failed (${response.status}).`);
+    const payload = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    throw new ApiError(readableDetail(payload?.detail, response.status), response.status);
   }
+  if (response.status === 204) return undefined as T; // e.g. logout has no body
   return response.json() as Promise<T>;
 }
 
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+
 export const api = {
-  capabilities: async (): Promise<Capability[]> => (await request<{ operations: Capability[] }>("/api/capabilities")).operations,
-  history: async (): Promise<Prediction[]> => (await request<{ items: Prediction[] }>("/api/predictions")).items,
-  segment: async (file: File): Promise<Prediction> => {
+  me: () => request<Account>("/api/auth/me"),
+  login: (email: string, password: string) => postJson<Account>("/api/auth/login", { email, password }),
+  register: (email: string, password: string) => postJson<Account>("/api/auth/register", { email, password }),
+  logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+  recharge: () => request<Account>("/api/auth/recharge", { method: "POST" }),
+  segment: (image: File) => {
     const body = new FormData();
-    body.append("image", file);
+    body.append("image", image);
     return request<Prediction>("/api/predictions", { method: "POST", body });
   },
-  me: () => request<Account>("/api/auth/me"),
-  auth: (path: "register" | "login", email: string, password: string) => request<Account>(`/api/auth/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) }),
-  recharge: () => request<Account>("/api/auth/recharge", { method: "POST" }),
-  compose: async (person: File, background: File): Promise<Composition> => { const body = new FormData(); body.append("person_image", person); body.append("background_image", background); return request<Composition>("/api/compositions", { method: "POST", body }); },
-  assetUrl: (path: string): string => `${baseUrl}${path}`,
+  compose: (person: File, background: File) => {
+    const body = new FormData();
+    body.append("person_image", person);
+    body.append("background_image", background);
+    return request<Composition>("/api/compositions", { method: "POST", body });
+  },
 };
