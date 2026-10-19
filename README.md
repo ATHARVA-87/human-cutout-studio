@@ -1,203 +1,151 @@
 # Human Cutout
 
-Human Cutout is a local full-stack application for binary human segmentation and simple image composition. A user creates an account, receives 30 demo credits, removes a person from a photo, or places that cutout over another image.
+[![CI](https://github.com/ATHARVA-87/human-cutout-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/ATHARVA-87/human-cutout-studio/actions/workflows/ci.yml)
 
-The project uses PyTorch for the trained U-Net, FastAPI and PostgreSQL for the application, and React + TypeScript for the browser UI.
+A U-Net trained from scratch to separate people from the background, served as a full-stack web app. Sign up, cut a person out of a photo, or place them into another picture with a drag-and-resize editor.
 
-## What it does
+**Live demo:** _link added after deployment_. It runs on a free server that sleeps when idle, so the first visit can take about a minute to wake up.
 
-- **Person segmentation** costs one credit and produces a binary mask, transparent cutout, and overlay.
-- **Combine with another image** costs two credits. The browser editor lets the user drag the cutout, use the mouse wheel to resize it, mirror it, and download the final PNG.
-- New accounts receive 30 credits. **Recharge** is deliberately a local-demo reset back to 30.
-- A dark/light green theme is available from the page header.
+![Composition editor](docs/composition.png)
 
-## Composition editor
+## Features
 
-![Human Cutout composition editor](docs/composition.png)
+- **Person segmentation** (1 credit): binary mask, transparent cutout with soft edges, and a tinted overlay.
+- **Combine with another image** (2 credits): the person is cropped, colour-matched to the new background, and placed in a canvas editor. Drag to move, scroll or use the slider to resize, mirror, and download a PNG. Half-body photos stay glued to the bottom edge; full-body ones get a soft contact shadow.
+- **Accounts and credits**: 30 free credits on sign-up, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
+- Light and dark theme.
 
-The editor preview above is captured from the local frontend. The extracted person can be dragged, resized with the mouse wheel, mirrored, and downloaded as a PNG.
+## Model results
 
-## Data contract
-
-The source dataset must have matching `images/` and `masks/` filenames. The preparation command validates all pairs, excludes collages by reading only those two directories, converts source images to RGB, converts masks to grayscale binary (`0` background, `255` person), and writes 256×256 files. Images use bilinear interpolation; masks use nearest-neighbour interpolation.
-
-**Data Source:** [Supervisely Filtered Segmentation Person Dataset](https://www.kaggle.com/datasets/tapakah68/supervisely-filtered-segmentation-person-dataset)
-
-The deterministic split is 80% train / 10% validation / 10% test: for 2,667 pairs, that is 2,133 / 266 / 268 samples.
-
-## Why 256×256
-
-The four downsampling stages require dimensions divisible by 16. 256×256 preserves substantially more detail than 128 while allowing a U-Net with 32 base channels, deep dropout, batch size 8, and mixed precision within the target 6 GB RTX 4050 budget. If a local CUDA measurement reports out-of-memory, lower `batch_size` in `configs/train.json` to 4 before reducing resolution.
-
-## Commands
-
-Use a supported Python version (3.10–3.14) with an NVIDIA-enabled PyTorch installation.
-
-If PyTorch is already installed in an activated conda environment such as `torch`, use that environment's `python`; the scripts support direct execution and do not require installing this package first.
-
-```bash
-# Option A: existing conda environment with PyTorch
-conda activate torch
-python scripts/prepare_data.py --raw-root ../archive/supervisely_person_clean_2667_img --output-root data/processed
-python scripts/train.py
-python scripts/verify_checkpoint.py
-
-# Option B: a new virtual environment
-python -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/python scripts/prepare_data.py --raw-root ../archive/supervisely_person_clean_2667_img --output-root data/processed
-.venv/bin/python scripts/train.py
-.venv/bin/python scripts/verify_checkpoint.py
-```
-
-The last command must succeed before any inference API is added. A real trained checkpoint is saved to `backend/weights/model.pth` only when validation Dice improves.
-
-## Run locally
-
-Use three terminals from the repository root. Docker is used only for PostgreSQL; FastAPI uses the local `torch` conda environment and loads the local checkpoint.
-
-**Terminal 1 — PostgreSQL**
-
-```bash
-newgrp docker  # needed only until a new login session includes the docker group
-cd ~/UNET/UNET/human-segmentation-platform
-docker compose up db -d
-docker compose ps
-```
-
-Wait until `db` reports `healthy`. Do not run `docker compose down --volumes` unless you want to delete local accounts, credits, and metadata.
-
-**Terminal 2 — API**
-
-```bash
-cd ~/UNET/UNET/human-segmentation-platform
-conda activate torch
-python -m pip install -e '.[dev]'
-python -m uvicorn backend.app.main:app --reload
-```
-
-Verify it in a fourth shell if desired:
-
-```bash
-curl http://127.0.0.1:8000/api/health
-```
-
-The expected result contains `"status":"ok"`, with both the model and database ready.
-
-**Terminal 3 — browser UI**
-
-```bash
-cd ~/UNET/UNET/human-segmentation-platform/frontend
-npm install
-VITE_USE_POLLING=true npm run dev
-```
-
-Open the exact local URL printed by Vite, normally `http://localhost:5173`. Polling avoids Linux `ENOSPC` file-watcher limits; it is not a memory leak.
-
-## Trained model baseline
-
-The initial U-Net has been trained on the prepared 2,667-pair dataset split (2,133 train / 266 validation / 268 test). The best checkpoint is intentionally excluded from Git and is available locally at `backend/weights/model.pth`.
-
-| Field | Result |
+| | |
 | --- | --- |
-| Architecture | Four-level U-Net, 32 base channels, deep dropout `0.2` |
-| Input | Normalized RGB 256×256 |
-| Best epoch | 38 of 40 |
-| Best validation Dice | 0.9229 |
-| Validation loss at best epoch | 0.2336 |
-| Test split | 268 untouched samples; global Dice **0.9259** at threshold 0.50 |
-| Fresh-process checkpoint test | Passed: output shape `(1, 1, 256, 256)` |
+| Architecture | 4-level U-Net, 32 base channels, BatchNorm, dropout in the deepest layers (7.8 M parameters) |
+| Data | 2,667 image/mask pairs at 256×256, split 2,133 train / 266 validation / 268 test |
+| Loss | Binary cross-entropy + soft Dice |
+| Best validation Dice | **0.9229** (epoch 38 of 40) |
+| Test Dice | **0.9259** on the 268 untouched test images, measured once |
+| Serving | Exported to ONNX (31 MB), matches PyTorch to within 1e-5 |
 
-The final epoch did not replace this artifact: its validation Dice was 0.9171. Checkpoints are selected strictly by validation Dice, not by the last epoch.
+## How it works
 
-The test Dice was measured once after all training and checkpoint-selection decisions were final. Evaluate a retrained model on the held-out split with:
-
-```bash
-conda activate torch
-python scripts/evaluate_test_split.py --checkpoint backend/weights/model.pth --data-root data/processed
+```text
+Browser (React + TypeScript)
+   │  same origin: cookies just work, no CORS
+   ▼
+FastAPI ──► rate limit (token bucket) ──► credits ──► U-Net on ONNX Runtime ──► realism steps
+   │                                                                        (crop, colour match)
+   ├── PostgreSQL: users, sessions, credit ledger, rate-limit buckets, history
+   └── uploads/: generated images, served at /media/...
 ```
 
-See [usage.txt](usage.txt) for the terminal-by-terminal local run guide.
+Training happens offline in PyTorch on a GPU (`src/segmentation`, `scripts/`). The best checkpoint is exported to `model.onnx`, and the web server only needs that file.
+
+## Tech stack
+
+| Layer | Choice | Why |
+| --- | --- | --- |
+| Model | PyTorch U-Net, trained from scratch | Shows the full ML loop: data preparation, training, validation, a held-out test |
+| Serving | ONNX Runtime | About half the memory of PyTorch, so it fits a free 512 MB server |
+| API | FastAPI (Python) | Typed request validation, async I/O, automatic docs at `/docs` |
+| Database | PostgreSQL + SQLAlchemy | Transactions, constraints and row locks keep credits and rate limits correct under concurrency |
+| Frontend | React + TypeScript (Vite) | Component UI with type safety; the editor is a plain `<canvas>` |
+| Packaging | Docker (multi-stage) | One image runs the same way locally and in production |
+| CI/CD | GitHub Actions + Render Blueprint | Tests (with a real Postgres) on every push; deploys only when CI passes |
+| Hosting | Render (app) · Neon (Postgres) · Hugging Face Hub (model file) | All free tiers, no credit card |
+
+## Run it locally
+
+You need Docker. To develop, you also need Python 3.10+ and Node 22.
+
+**Option A: everything in Docker (same as production)**
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Open http://localhost:8000. If `backend/weights/model.onnx` is missing, the build downloads it from `MODEL_URL`.
+
+**Option B: development with hot reload**
+
+```bash
+cp .env.example .env
+docker compose up db -d                       # PostgreSQL only
+python -m pip install -e '.[dev]'             # once (use a venv or conda env)
+python -m uvicorn backend.app.main:app --reload
+# second terminal
+cd frontend && npm install && npm run dev     # open the URL Vite prints (http://localhost:5173)
+```
+
+Vite forwards `/api` and `/media` to FastAPI on port 8000. If Linux reports `ENOSPC` file-watcher errors, run `VITE_USE_POLLING=true npm run dev`.
+
+**Tests:** `python -m pytest`. The API tests need the Docker database running and use a separate `segmentation_test` database.
+
+## Train, evaluate and export the model
+
+```bash
+python -m pip install -e '.[train]'
+python scripts/prepare_data.py --raw-root <dataset with images/ and masks/> --output-root data/processed
+python scripts/train.py                     # saves backend/weights/model.pth when validation Dice improves
+python scripts/verify_checkpoint.py         # reloads it in a fresh process
+python scripts/evaluate_test_split.py       # one-time test-set Dice
+python scripts/export_onnx.py               # writes backend/weights/model.onnx for the server
+```
+
+Hyperparameters live in [configs/train.json](configs/train.json). The checkpoint stores its own architecture and preprocessing settings, and the ONNX file carries them too, so the server never hard-codes the input size.
+
+## Database admin (owner only)
+
+There is no admin web page. These commands need the database connection string, so only the person holding it can run them:
+
+```bash
+python scripts/db_admin.py stats     # size and row counts (keep an eye on the free-tier storage limit)
+python scripts/db_admin.py reset     # deletes ALL users and history; asks you to type the database name
+
+# production: pass the Neon connection string for this one command
+SEGMENTATION_DATABASE_URL='postgresql+psycopg://…neon.tech/neondb?sslmode=require' python scripts/db_admin.py stats
+```
 
 ## API
 
-The checkpoint verifier has passed for the initial trained model. Start PostgreSQL and the API with environment values suitable for your machine. The API needs `SEGMENTATION_DATABASE_URL`, `SEGMENTATION_CHECKPOINT_PATH`, and a non-default `SEGMENTATION_RATE_LIMIT_SALT` in production.
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/api/auth/register` · `/api/auth/login` | JSON `{email, password}`; sets an HTTP-only session cookie |
+| POST | `/api/auth/logout` | 204 |
+| GET | `/api/auth/me` | current email and credits |
+| POST | `/api/auth/recharge` | +30 credits, only when below 2 |
+| POST | `/api/predictions` | multipart `image` (JPG/PNG ≤ 10 MB); 1 credit |
+| GET | `/api/predictions` · `/api/predictions/{id}` | your history only |
+| POST | `/api/compositions` | multipart `person_image` + `background_image`; 2 credits |
+| GET | `/api/health` | model and database status |
 
-```bash
-export SEGMENTATION_DATABASE_URL='postgresql+psycopg://segmentation:segmentation@localhost:5432/segmentation'
-export SEGMENTATION_RATE_LIMIT_SALT='replace-this-with-a-secret'
-cd /home/atharva/UNET/UNET/human-segmentation-platform
-python -m uvicorn backend.app.main:app --reload
+Errors: 401 (not signed in), 402 (not enough credits), 415 (not JPG/PNG), 429 (rate limited, with `Retry-After`).
+
+## Project structure
+
+```text
+backend/app/
+  api/          HTTP routes (auth, predictions, compositions, health)
+  services/     auth, credits, rate_limit, jobs, inference (ONNX), realism, storage
+  db/           SQLAlchemy models and session
+  core/         settings from environment variables
+frontend/src/   React app: App.tsx + components/ (AuthScreen, Header, ImagePicker, Composer, …)
+src/segmentation/  U-Net, dataset, training loop, checkpoint contract, ONNX export
+scripts/        prepare_data, train, verify_checkpoint, evaluate_test_split, export_onnx, db_admin
+tests/          unit tests + API tests against real PostgreSQL
+Dockerfile · docker-compose.yml · render.yaml · .github/workflows/ci.yml
 ```
 
-Or use Docker Compose (copy `.env.example` to `.env` and set its rate-limit salt first):
+## Deployment
 
-```bash
-docker compose up --build
-curl http://localhost:8000/api/health
-```
+`render.yaml` describes the production service: the Docker image runs on Render's free plan, the database is a free Neon PostgreSQL, and `model.onnx` is downloaded from the Hugging Face Hub during the build. Pushing to `main` runs CI, and Render deploys only when CI passes. Step-by-step instructions are in [WALKTHROUGH.md](WALKTHROUGH.md#13-deploying-for-free-step-by-step).
 
-The Compose configuration mounts the locally trained checkpoint read-only and keeps PostgreSQL and generated uploads in Docker volumes. It requests an NVIDIA GPU; remove `gpus: all` from [docker-compose.yml](docker-compose.yml) if NVIDIA Container Toolkit is not installed.
+## Limitations
 
-Key endpoints are `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/recharge`, `POST /api/predictions`, and `POST /api/compositions`. The application uses cookie sessions, per-user credits, and a small secondary IP-based usage guard. See [architecture.md](docs/architecture.md).
+- The model works at 256×256, so fine details like hair are approximate. It sometimes includes bright background patches, such as sky near the horizon.
+- The realism steps are classic image processing. They do not fix perspective or the direction of light.
+- On the free plan, generated images are stored on the server's temporary disk and disappear when it restarts. Accounts, credits and history are kept in PostgreSQL.
 
-## Frontend
+## Dataset
 
-The React + TypeScript client in [frontend/](/home/atharva/UNET/UNET/human-segmentation-platform/frontend) provides person-image upload, original/mask/overlay comparison, API error states, and prediction history. It reads `/api/capabilities`, so new operations can be added to the backend without changing its app structure.
-
-With the API running at `http://127.0.0.1:8000`, start the Vite development server in a second terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`. Vite proxies `/api` and `/media` to the local API. For a separately deployed backend, set `VITE_API_BASE_URL` before building:
-
-```bash
-VITE_API_BASE_URL=https://api.example.com npm run build
-```
-
-If Vite reports `ENOSPC` file-watcher errors on Linux, use polling instead of inotify:
-
-```bash
-VITE_USE_POLLING=true npm run dev
-```
-
-## Accounts and credits
-
-The local application uses email/password accounts with PBKDF2 password hashing and an HTTP-only session cookie. Every new account receives 30 credits. Person segmentation costs one credit; creating an editable composition costs two credits. The top bar displays the balance and its **Recharge** button resets the current local/demo account to 30 credits.
-
-After pulling these changes, update the active conda environment and restart FastAPI so the local database gets its non-destructive schema update:
-
-```bash
-conda activate torch
-python -m pip install -e '.[dev]'
-python -m uvicorn backend.app.main:app --reload
-```
-
-For a composition, choose **Combine with another image**, upload the person photo and background, then drag the cutout in the canvas. Scroll over the canvas to resize it and use **Mirror** to flip it. The download creates a PNG from the exact client-side placement.
-
-## Future direction: more realistic background replacement
-
-The current composition is intentionally a fast, editable raw paste. Its limitations are visible: hard edges, no ground contact shadow, mismatched lighting, and a person that can look sharper or cleaner than the background.
-
-The next improvement will use only OpenCV and NumPy—no new ML model. It will add [compositing.py](backend/app/services/compositing.py) with:
-
-```python
-composite(person_rgb, mask, background_rgb, x, y, scale, params=None) -> composite_rgb
-```
-
-The planned, explainable pipeline is: feather and slightly erode the mask; place/clip the person; match LAB mean and standard deviation to the nearby background; draw a soft contact shadow before the person; match blur and film grain; then alpha composite entirely in float32. The API will accept background upload, placement, scale, and optional edge/shadow/color/grain controls. The future UI will add sliders and a raw-paste-versus-refined comparison toggle.
-
-This work must proceed one testable step at a time, with confirmation after each step. It will include OpenCV/NumPy-only tests, a comparison-image script, and [COMPOSITING.md](docs/COMPOSITING.md) before it is considered complete.
-
-## Replacing or retraining the model
-
-The API reads its input dimensions, normalization, resize strategy, output threshold, architecture identifier, and U-Net channel/dropout configuration from the checkpoint. Therefore a compatible U-Net retrained at 512×512 (or another size divisible by 16) needs no frontend or API code change: replace `backend/weights/model.pth`, run the verifier, then restart the API.
-
-Newly trained checkpoints use metadata format v2. The existing trained v1 checkpoint remains supported. A fundamentally new network architecture needs a small explicit model factory registration in [checkpoints.py](src/segmentation/checkpoints.py); the backend deliberately rejects unknown architecture IDs rather than loading incompatible weights unsafely.
-
-For the design and implementation story, read [WALKTHROUGH.md](WALKTHROUGH.md).
+Trained on a cleaned subset (2,667 image/mask pairs) of the Supervisely Person dataset. Check the original dataset's license before reusing its images.
