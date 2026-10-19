@@ -106,9 +106,19 @@ The initial U-Net has been trained on the prepared 2,667-pair dataset split (2,1
 | Best epoch | 38 of 40 |
 | Best validation Dice | 0.9229 |
 | Validation loss at best epoch | 0.2336 |
+| Test split | 268 untouched samples; global Dice **0.9259** at threshold 0.50 |
 | Fresh-process checkpoint test | Passed: output shape `(1, 1, 256, 256)` |
 
 The final epoch did not replace this artifact: its validation Dice was 0.9171. Checkpoints are selected strictly by validation Dice, not by the last epoch.
+
+The test Dice was measured once after all training and checkpoint-selection decisions were final. Evaluate a retrained model on the held-out split with:
+
+```bash
+conda activate torch
+python scripts/evaluate_test_split.py --checkpoint backend/weights/model.pth --data-root data/processed
+```
+
+See [usage.txt](usage.txt) for the terminal-by-terminal local run guide.
 
 ## API
 

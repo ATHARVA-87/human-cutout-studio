@@ -16,9 +16,18 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 class SegmentationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
-    def __init__(self, processed_root: str | Path, split: str, augment: bool = False) -> None:
+    def __init__(
+        self,
+        processed_root: str | Path,
+        split: str,
+        augment: bool = False,
+        mean: tuple[float, float, float] = IMAGENET_MEAN,
+        std: tuple[float, float, float] = IMAGENET_STD,
+    ) -> None:
         self.root = Path(processed_root)
         self.augment = augment
+        self.mean = torch.tensor(mean).view(3, 1, 1)
+        self.std = torch.tensor(std).view(3, 1, 1)
         manifest = json.loads((self.root / "splits.json").read_text())
         if split not in manifest["splits"]:
             raise ValueError(f"Unknown split {split!r}")
@@ -34,9 +43,6 @@ class SegmentationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         if self.augment and random.random() < 0.5:
             image, mask = image[:, ::-1].copy(), mask[:, ::-1].copy()
         image_tensor = torch.from_numpy(image.transpose(2, 0, 1))
-        mean = torch.tensor(IMAGENET_MEAN).view(3, 1, 1)
-        std = torch.tensor(IMAGENET_STD).view(3, 1, 1)
-        image_tensor = (image_tensor - mean) / std
+        image_tensor = (image_tensor - self.mean) / self.std
         mask_tensor = torch.from_numpy((mask > 127).astype(np.float32)).unsqueeze(0)
         return image_tensor, mask_tensor
-

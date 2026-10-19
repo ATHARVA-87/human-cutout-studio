@@ -18,7 +18,7 @@ Every pair is converted to RGB plus binary grayscale mask and resized to 256×25
 
 The model keeps classic U-Net encoder-decoder skip connections. It adds configurable `Dropout2d` only in deeper layers, where regularisation helps without erasing shallow edge information.
 
-The trained checkpoint is selected by validation Dice, not by the final epoch. Training reached its best validation Dice of 0.9229 at epoch 38. [model.pth](backend/weights/model.pth) is ignored by Git, but it includes weights, model configuration, preprocessing, threshold, checkpoint version, epoch, and score.
+The trained checkpoint is selected by validation Dice, not by the final epoch. Training reached its best validation Dice of 0.9229 at epoch 38. After those decisions were locked, the checkpoint achieved global Dice 0.9259 on the untouched 268-sample test split. [model.pth](backend/weights/model.pth) is ignored by Git, but it includes weights, model configuration, preprocessing, threshold, checkpoint version, epoch, and score.
 
 This metadata is important: the API reconstructs the compatible U-Net and input preprocessing from the checkpoint instead of hard-coding 256×256. A retrained compatible U-Net can therefore replace the weight file after verification and API restart.
 
