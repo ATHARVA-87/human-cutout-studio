@@ -1,3 +1,3 @@
-from .models import Prediction, UsageEvent
+from .models import Composition, CreditTransaction, Prediction, RateLimitBucket, SessionToken, User
 
-__all__ = ["Prediction", "UsageEvent"]
+__all__ = ["Composition", "CreditTransaction", "Prediction", "RateLimitBucket", "SessionToken", "User"]

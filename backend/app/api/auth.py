@@ -1,33 +1,66 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, EmailStr, Field
+"""Account routes: register, login, logout, current user, demo recharge."""
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from backend.app.db.models import CreditTransaction, SessionToken, User
+
+from backend.app.db.models import CreditTransaction, User
 from backend.app.db.session import get_session
-from backend.app.services.auth import COOKIE_NAME, create_session, current_user, hash_password, verify_password
+from backend.app.schemas import Account, Credentials
+from backend.app.services.auth import current_user, end_session, hash_password, start_session, verify_password
+from backend.app.services.credits import recharge as recharge_credits
+from backend.app.services.jobs import COMPOSE_COST, RECHARGE_AMOUNT
+from backend.app.services.rate_limit import new_bucket
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-class Credentials(BaseModel): email: EmailStr; password: str = Field(min_length=8, max_length=128)
-class Account(BaseModel): email: str; credits: int
-def account(user: User) -> Account: return Account(email=user.email, credits=user.credits)
-def sign_in(response: Response, session: Session, user: User) -> Account:
-    response.set_cookie(COOKIE_NAME, create_session(session, user), httponly=True, samesite="lax", secure=False, max_age=604800, path="/")
-    return account(user)
-@router.post("/register", response_model=Account, status_code=201)
+WELCOME_CREDITS = 30
+
+
+def to_account(user: User) -> Account:
+    return Account(email=user.email, credits=user.credits)
+
+
+@router.post("/register", response_model=Account, status_code=status.HTTP_201_CREATED)
 def register(body: Credentials, response: Response, session: Session = Depends(get_session)) -> Account:
-    if session.scalar(select(User).where(User.email == body.email.lower())): raise HTTPException(409, "An account with that email already exists.")
-    user = User(email=body.email.lower(), password_hash=hash_password(body.password)); session.add(user); session.flush(); session.add(CreditTransaction(user_id=user.id, amount=30, reason="welcome_credits")); session.commit(); session.refresh(user)
-    return sign_in(response, session, user)
+    email = body.email.lower()
+    if session.scalar(select(User).where(User.email == email)):
+        raise HTTPException(status.HTTP_409_CONFLICT, "An account with that email already exists.")
+    user = User(email=email, password_hash=hash_password(body.password), credits=WELCOME_CREDITS)
+    session.add(user)
+    try:
+        session.flush()  # sends the INSERT so user.id exists for the rows below
+    except IntegrityError:  # two sign-ups with the same email at the same moment
+        session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "An account with that email already exists.")
+    session.add(CreditTransaction(user_id=user.id, amount=WELCOME_CREDITS, reason="welcome_credits"))
+    session.add(new_bucket(user))
+    session.commit()
+    start_session(session, response, user)
+    return to_account(user)
+
+
 @router.post("/login", response_model=Account)
 def login(body: Credentials, response: Response, session: Session = Depends(get_session)) -> Account:
     user = session.scalar(select(User).where(User.email == body.email.lower()))
-    if not user or not verify_password(body.password, user.password_hash): raise HTTPException(401, "Invalid email or password.")
-    return sign_in(response, session, user)
-@router.post("/logout", status_code=204)
-def logout(response: Response, session: Session = Depends(get_session), user: User = Depends(current_user)) -> Response:
-    session.execute(SessionToken.__table__.delete().where(SessionToken.user_id == user.id)); session.commit(); response.delete_cookie(COOKIE_NAME, path="/"); return response
+    # Same message for "no such email" and "wrong password", so attackers cannot discover accounts.
+    if user is None or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+    start_session(session, response, user)  # replaces any session on another device
+    return to_account(user)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(request: Request, response: Response, session: Session = Depends(get_session)) -> None:
+    end_session(session, request, response)
+
+
 @router.get("/me", response_model=Account)
-def me(user: User = Depends(current_user)) -> Account: return account(user)
+def me(user: User = Depends(current_user)) -> Account:
+    return to_account(user)
+
+
 @router.post("/recharge", response_model=Account)
 def recharge(session: Session = Depends(get_session), user: User = Depends(current_user)) -> Account:
-    user.credits = 30; session.add(CreditTransaction(user_id=user.id, amount=30, reason="demo_recharge_reset")); session.commit(); session.refresh(user); return account(user)
+    recharge_credits(session, user, minimum=COMPOSE_COST, amount=RECHARGE_AMOUNT)
+    return to_account(user)

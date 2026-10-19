@@ -3,10 +3,11 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "human-segmentation-platform"
-version = "0.1.0"
-description = "Reproducible training pipeline for binary human segmentation"
+name = "human-cutout"
+version = "1.0.0"
+description = "U-Net person segmentation trained from scratch, served by a FastAPI + PostgreSQL + React web app"
 requires-python = ">=3.10,<3.15"
+# What the web server needs.
 dependencies = [
   "fastapi>=0.115",
   "email-validator>=2.2",
@@ -17,16 +18,16 @@ dependencies = [
   "python-multipart>=0.0.12",
   "SQLAlchemy>=2.0",
   "torch>=2.4",
-  "tqdm>=4.66",
   "uvicorn[standard]>=0.32",
 ]
 
 [project.optional-dependencies]
-dev = ["httpx>=0.27", "pytest>=8.0"]
+train = ["tqdm>=4.66"]  # progress bars for scripts/train.py and scripts/evaluate_test_split.py
+dev = ["httpx>=0.27", "pytest>=8.0", "tqdm>=4.66"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]

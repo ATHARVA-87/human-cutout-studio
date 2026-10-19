@@ -1,3 +1,5 @@
+# Local stack: `docker compose up --build`, then open http://localhost:8000
+# Development (hot reload) uses only the database: `docker compose up db -d`
 services:
   db:
     image: postgres:16-alpine
@@ -13,25 +15,22 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432" # reachable from this computer only, not from the network
 
-  api:
-    build: .
+  app:
+    build:
+      context: .
+      args:
+        MODEL_URL: ${MODEL_URL:-} # only used when backend/weights/model.pth does not exist
     depends_on:
       db:
         condition: service_healthy
     environment:
       SEGMENTATION_DATABASE_URL: postgresql+psycopg://segmentation:segmentation@db:5432/segmentation
-      SEGMENTATION_CHECKPOINT_PATH: /app/backend/weights/model.pth
-      SEGMENTATION_STORAGE_DIR: /app/uploads
-      SEGMENTATION_RATE_LIMIT_SALT: ${SEGMENTATION_RATE_LIMIT_SALT:?set this in .env}
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/weights:/app/backend/weights:ro
       - uploads_data:/app/uploads
-    # Requires NVIDIA Container Toolkit. Remove this section for CPU inference.
-    gpus: all
 
 volumes:
   postgres_data:
