@@ -758,9 +758,9 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 37. *What does your Content Security Policy do?* Lets the browser load scripts, styles, fonts and API calls only from our own origin, blocks plugins and framing. Self-hosting fonts made `'self'` possible.
 38. *How would you debug a user's failed request in production?* Ask for the `X-Request-ID` from the response (or the UI), then search the logs for it: one line with method, path, status and duration.
 39. *Offset vs keyset pagination?* Offset is simple and supports "page N" but scans skipped rows. Keyset (`WHERE created_at < last_seen`) stays fast at any depth but only supports next/previous.
+40. *What's in your privacy notice and why no cookie banner?* What I collect, why, retention, processors, rights, cookies. Only one strictly necessary cookie and no trackers, which are exempt from consent.
 41. *How does the editor remember where you left the person?* A debounced autosave `PUT` (0.5 s after the last change, plus a flush on close) upserts one row per composition, as fractions of the background. The history list includes it through a LEFT JOIN, so there are no N+1 queries.
 42. *Why did the Create page lose its state, and how did you fix it?* React state lives as long as the component is mounted. Navigating away unmounted it. Now it stays mounted but hidden, and is cleared on sign-out for privacy.
-40. *What's in your privacy notice and why no cookie banner?* What I collect, why, retention, processors, rights, cookies. Only one strictly necessary cookie and no trackers, which are exempt from consent.
 
 ---
 
