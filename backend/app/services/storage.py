@@ -8,6 +8,7 @@ swapped for object storage such as Amazon S3 without changing the routes.
 from __future__ import annotations
 
 import io
+import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -105,3 +106,11 @@ class LocalStorage:
         background.save(background_path, quality=90)
         cutout.save(cutout_path)
         return str(background_path), str(cutout_path)
+
+
+def delete_job_folder(path: str) -> None:
+    """Delete the uuid folder that holds one job's files. Refuses anything outside the storage folder."""
+    folder = Path(path).resolve().parent
+    root = settings.storage_dir.resolve()
+    if folder.parent == root and folder.is_dir():  # exactly uploads/<uuid>/, never uploads/ itself
+        shutil.rmtree(folder, ignore_errors=True)

@@ -1,4 +1,6 @@
-import type { Account, Composition, Prediction } from "../types";
+import type { Account, Composition, Page, Prediction } from "../types";
+
+const PAGE_SIZE = 12;
 
 /** An error from the backend, keeping the HTTP status so the UI can react (401 -> login, 402 -> recharge). */
 export class ApiError extends Error {
@@ -54,4 +56,11 @@ export const api = {
     body.append("background_image", background);
     return request<Composition>("/api/compositions", { method: "POST", body });
   },
+  // History (newest first, PAGE_SIZE items per call)
+  listPredictions: (offset = 0) => request<Page<Prediction>>(`/api/predictions?limit=${PAGE_SIZE}&offset=${offset}`),
+  listCompositions: (offset = 0) => request<Page<Composition>>(`/api/compositions?limit=${PAGE_SIZE}&offset=${offset}`),
+  deletePrediction: (id: string) => request<void>(`/api/predictions/${id}`, { method: "DELETE" }),
+  deleteComposition: (id: string) => request<void>(`/api/compositions/${id}`, { method: "DELETE" }),
+  deleteAccount: (password: string) =>
+    request<void>("/api/auth/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) }),
 };

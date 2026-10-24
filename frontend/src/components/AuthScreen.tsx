@@ -1,6 +1,8 @@
 import { type FormEvent, useState } from "react";
 import { api } from "../api/client";
+import { href } from "../router";
 import type { Account } from "../types";
+import { PasswordInput } from "./PasswordInput";
 
 interface AuthScreenProps {
   notice?: string; // e.g. "your session ended" after being signed out elsewhere
@@ -52,13 +54,7 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
       <form className="auth-card" onSubmit={onSubmit} noValidate>
         {notice && !error && <p className="notice">{notice}</p>}
         <input placeholder="Email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-        <input
-          placeholder="Password (8+ characters)"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
+        <PasswordInput placeholder="Password (8+ characters)" value={password} onChange={setPassword} />
         <button className="primary" type="submit" disabled={busy}>
           Sign in
         </button>
@@ -66,6 +62,10 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
           Create account
         </button>
         {error && <p className="notice">{error}</p>}
+        <p className="fine-print">
+          By creating an account you agree to the <a href={href("privacy")}>Privacy Notice</a>. Uploads and results are deleted
+          automatically after 5 days. Only upload photos you have the right to use.
+        </p>
       </form>
     </>
   );

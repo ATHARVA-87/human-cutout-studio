@@ -443,7 +443,7 @@ The free server has **512 MB RAM and 0.1 CPU**. I measured inside the production
    1. Make an account at huggingface.co, then **New → Model**, name it `human-cutout-unet`, public.
    2. **Files → Add file → Upload files:** upload `backend/weights/model.onnx`. Create it first with `python scripts/export_onnx.py` if missing.
    3. Optionally add a README model card (architecture, data, Dice scores, limitations from this guide).
-   4. The download link is `https://huggingface.co/<your-username>/human-cutout-unet/resolve/main/model.onnx`. If your username is not `ATHARVA-87`, change it in `render.yaml` and `.env.example`.
+   4. The download link is `https://huggingface.co/SUPER-87/human-cutout-unet/resolve/main/model.onnx` (my Hugging Face username is `SUPER-87`); it is set in `render.yaml` and `.env.example`. Check it with `curl -IL <link>`; the SHA-256 of the download should equal `sha256sum backend/weights/model.onnx`.
 2. **Database → Neon**
    1. Sign in at neon.tech with GitHub. Create a project `human-cutout` in region **AWS Asia Pacific (Singapore)**, the same region as Render, so queries are fast.
    2. **Connect** → copy the connection string **with connection pooling turned off** (the direct host, without `-pooler`). Our app already pools, and a direct connection avoids PgBouncer prepared-statement issues.

@@ -1,18 +1,35 @@
-"""Composition route: cut the person out of one photo and prepare it for placing on another."""
+"""Composition routes: cut the person out of one photo and prepare it for placing on another;
+list, reopen and delete past compositions."""
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.app.api.predictions import model_or_503
+from backend.app.api.deps import get_owned, model_or_503
 from backend.app.db.models import Composition, User
 from backend.app.db.session import get_session
-from backend.app.schemas import CompositionResponse
+from backend.app.schemas import CompositionListResponse, CompositionResponse
 from backend.app.services.auth import current_user
 from backend.app.services.jobs import COMPOSE_COST, run_paid_job
 from backend.app.services.realism import crop_to_person, match_colors, touches_bottom
-from backend.app.services.storage import LocalStorage, media_url, read_image
+from backend.app.services.retention import expiry_of
+from backend.app.services.storage import LocalStorage, delete_job_folder, media_url, read_image
 
 router = APIRouter(prefix="/compositions", tags=["compositions"])
+
+
+def to_response(composition: Composition, credits: int | None = None) -> CompositionResponse:
+    return CompositionResponse(
+        id=composition.id,
+        created_at=composition.created_at,
+        expires_at=expiry_of(composition.created_at),
+        background_url=media_url(composition.background_path),
+        cutout_url=media_url(composition.cutout_path),
+        anchor_bottom=composition.anchor_bottom,
+        credits=credits,
+    )
 
 
 @router.post("", response_model=CompositionResponse, status_code=status.HTTP_201_CREATED)
@@ -36,10 +53,33 @@ async def create_composition(
     composition = Composition(user_id=user.id, background_path=background_path, cutout_path=cutout_path, anchor_bottom=anchor_bottom)
     session.add(composition)
     session.commit()
-    return CompositionResponse(
-        id=composition.id,
-        background_url=media_url(background_path),
-        cutout_url=media_url(cutout_path),
-        anchor_bottom=anchor_bottom,
-        credits=user.credits,
-    )
+    session.refresh(composition)  # load created_at, which the database fills in
+    return to_response(composition, credits=user.credits)
+
+
+@router.get("", response_model=CompositionListResponse)
+def list_compositions(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+) -> CompositionListResponse:
+    items = session.scalars(
+        select(Composition).where(Composition.user_id == user.id).order_by(Composition.created_at.desc()).offset(offset).limit(limit)
+    ).all()
+    total = session.scalar(select(func.count()).select_from(Composition).where(Composition.user_id == user.id)) or 0
+    return CompositionListResponse(items=[to_response(item) for item in items], total=total)
+
+
+@router.get("/{composition_id}", response_model=CompositionResponse)
+def get_composition(composition_id: UUID, session: Session = Depends(get_session), user: User = Depends(current_user)) -> CompositionResponse:
+    return to_response(get_owned(session, Composition, composition_id, user))
+
+
+@router.delete("/{composition_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_composition(composition_id: UUID, session: Session = Depends(get_session), user: User = Depends(current_user)) -> None:
+    composition = get_owned(session, Composition, composition_id, user)
+    files = composition.cutout_path
+    session.delete(composition)
+    session.commit()
+    delete_job_folder(files)  # only after the commit: never delete files of a row that still exists

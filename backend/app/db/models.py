@@ -51,6 +51,17 @@ class RateLimitBucket(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class LoginAttempt(Base):
+    """One row per FAILED login, used to stop password guessing. Stores a hash of the email, not the email."""
+
+    __tablename__ = "login_attempts"
+    __table_args__ = (Index("ix_login_attempts_email_created", "email_hash", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    email_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Prediction(Base):
     __tablename__ = "predictions"
     # Matches the history query: WHERE user_id = ? ORDER BY created_at DESC.

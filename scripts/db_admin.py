@@ -6,6 +6,7 @@ string (your local .env, or the Neon URL for production). Having that secret is 
 
   python scripts/db_admin.py stats                     # local database from .env
   python scripts/db_admin.py reset                     # asks you to type the database name first
+  python scripts/db_admin.py cleanup                   # run the retention job now (normally automatic)
   SEGMENTATION_DATABASE_URL='postgresql+psycopg://...' python scripts/db_admin.py stats   # production
 """
 
@@ -27,6 +28,7 @@ from sqlalchemy import inspect, text  # noqa: E402
 from backend.app.core.config import settings  # noqa: E402
 from backend.app.db import models  # noqa: E402,F401  (registers the tables)
 from backend.app.db.session import Base, engine  # noqa: E402
+from backend.app.services.retention import run_cleanup  # noqa: E402
 
 
 def app_tables() -> list[str]:
@@ -92,9 +94,15 @@ def main() -> int:
     commands.add_parser("stats", help="show database size and row counts")
     reset_parser = commands.add_parser("reset", help="delete all app data (keeps the tables)")
     reset_parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    commands.add_parser("cleanup", help=f"delete data older than {settings.retention_days} days now")
     args = parser.parse_args()
     if args.command == "stats":
         stats()
+        return 0
+    if args.command == "cleanup":
+        print(f"Database: {engine.url.render_as_string(hide_password=True)}")
+        report = run_cleanup()
+        print(report if report else "Another cleanup is already running; nothing done.")
         return 0
     return reset(args.yes)
 

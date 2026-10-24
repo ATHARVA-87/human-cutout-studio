@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "./api/client";
 import { AuthScreen } from "./components/AuthScreen";
-import { Composer } from "./components/Composer";
+import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
-import { ImagePicker } from "./components/ImagePicker";
-import { PredictionResult } from "./components/PredictionResult";
 import { RechargeModal } from "./components/RechargeModal";
-import { type Account, COMPOSE_COST, type Composition, type Prediction, SEGMENT_COST } from "./types";
-
-type Mode = "segment" | "compose";
+import { CreatePage } from "./pages/CreatePage";
+import { HistoryPage } from "./pages/HistoryPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
+import { useRoute } from "./router";
+import { type Account, COMPOSE_COST } from "./types";
 
 function savedTheme(): boolean {
   try {
@@ -18,21 +18,15 @@ function savedTheme(): boolean {
   }
 }
 
+/** App-wide state (who is signed in, theme, recharge dialog) and which page to show. */
 export default function App() {
+  const route = useRoute();
   const [user, setUser] = useState<Account>();
   const [checkingSession, setCheckingSession] = useState(true);
   const [dark, setDark] = useState(savedTheme);
-  const [mode, setMode] = useState<Mode>("segment");
-  const [person, setPerson] = useState<File>();
-  const [background, setBackground] = useState<File>();
-  const [result, setResult] = useState<Prediction>();
-  const [composition, setComposition] = useState<Composition>();
-  const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const [rechargeOpen, setRechargeOpen] = useState(false);
-
-  const cost = mode === "segment" ? SEGMENT_COST : COMPOSE_COST;
+  const [rechargeCost, setRechargeCost] = useState<number>(); // set = recharge dialog open
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -52,63 +46,35 @@ export default function App() {
       .finally(() => setCheckingSession(false));
   }, []);
 
-  const clearWork = () => {
-    setPerson(undefined);
-    setBackground(undefined);
-    setResult(undefined);
-    setComposition(undefined);
-    setError(undefined);
-    setRechargeOpen(false);
+  const signOut = (message: string) => {
+    setUser(undefined);
+    setRechargeCost(undefined);
+    setNotice(message);
   };
 
-  /** One place that turns server errors into UI behaviour. */
-  const handleError = (caught: unknown) => {
+  /** One place that turns server errors into UI behaviour. Returns a message for the page to show, if any. */
+  const handleApiError = (caught: unknown, cost = COMPOSE_COST): string | undefined => {
     if (caught instanceof ApiError && caught.status === 401) {
-      clearWork();
-      setUser(undefined);
-      setNotice(caught.message); // e.g. signed in on another device
-    } else if (caught instanceof ApiError && caught.status === 402) {
+      signOut(caught.message); // e.g. signed in on another device
+      return undefined;
+    }
+    if (caught instanceof ApiError && caught.status === 402) {
       api.me().then(setUser).catch(() => undefined); // show the real balance in the dialog
-      setRechargeOpen(true);
-    } else {
-      setError(caught instanceof Error ? caught.message : "Something went wrong.");
+      setRechargeCost(cost);
+      return undefined;
     }
-  };
-
-  const run = async () => {
-    if (!user || !person || (mode === "compose" && !background)) return;
-    if (user.credits < cost) return setRechargeOpen(true); // do not start a job we cannot pay for
-    setBusy(true);
-    setError(undefined);
-    try {
-      if (mode === "segment") {
-        const prediction = await api.segment(person);
-        setResult(prediction);
-        setComposition(undefined);
-        const credits = prediction.credits;
-        if (credits !== null) setUser((current) => current && { ...current, credits });
-      } else {
-        const created = await api.compose(person, background!);
-        setComposition(created);
-        setResult(undefined);
-        setUser((current) => current && { ...current, credits: created.credits });
-      }
-    } catch (caught) {
-      handleError(caught);
-    } finally {
-      setBusy(false);
-    }
+    return caught instanceof Error ? caught.message : "Something went wrong.";
   };
 
   const recharge = async () => {
     setBusy(true);
     try {
       setUser(await api.recharge());
-      setRechargeOpen(false);
-      setError(undefined);
+      setRechargeCost(undefined);
     } catch (caught) {
-      setRechargeOpen(false);
-      handleError(caught);
+      setRechargeCost(undefined);
+      const message = handleApiError(caught);
+      if (message) window.alert(message); // e.g. "Recharge is available when you have fewer than 2 credits."
     } finally {
       setBusy(false);
     }
@@ -116,14 +82,13 @@ export default function App() {
 
   const logout = async () => {
     await api.logout().catch(() => undefined); // log out locally even if the server is unreachable
-    clearWork();
-    setUser(undefined);
-    setNotice("You have been logged out.");
+    signOut("You have been logged out.");
   };
 
   const header = (
     <Header
       user={user}
+      route={route}
       dark={dark}
       busy={busy}
       onToggleTheme={() => setDark((value) => !value)}
@@ -132,49 +97,52 @@ export default function App() {
     />
   );
 
-  if (checkingSession) return <main>{header}</main>;
-
-  if (!user) {
-    return (
-      <main className="auth">
-        {header}
-        <AuthScreen
-          notice={notice}
-          onSignedIn={(account) => {
-            setNotice(undefined);
-            setUser(account);
-          }}
-        />
-      </main>
+  let page;
+  if (route === "privacy") {
+    page = <PrivacyPage />; // public: readable without an account
+  } else if (checkingSession) {
+    page = null;
+  } else if (!user) {
+    page = (
+      <AuthScreen
+        notice={notice}
+        onSignedIn={(account) => {
+          setNotice(undefined);
+          setUser(account);
+        }}
+      />
+    );
+  } else if (route === "history") {
+    page = (
+      <HistoryPage
+        retentionDays={user.retention_days}
+        onApiError={handleApiError}
+        onAccountDeleted={() => signOut("Your account and all of its data were deleted.")}
+      />
+    );
+  } else {
+    page = (
+      <CreatePage
+        user={user}
+        busy={busy}
+        setBusy={setBusy}
+        onCredits={(credits) => setUser((current) => current && { ...current, credits })}
+        onNeedCredits={setRechargeCost}
+        onApiError={handleApiError}
+      />
     );
   }
 
   return (
-    <main>
-      {header}
-      <section className="hero">
-        <p className="eyebrow">Welcome back</p>
-        <h1>What would you like to create?</h1>
-      </section>
-      <section className="operations">
-        <button className={mode === "segment" ? "operation selected" : "operation"} onClick={() => setMode("segment")}>
-          Person segmentation<small>{SEGMENT_COST} credit · mask and cutout</small>
-        </button>
-        <button className={mode === "compose" ? "operation selected" : "operation"} onClick={() => setMode("compose")}>
-          Combine with another image<small>{COMPOSE_COST} credits · position and edit</small>
-        </button>
-      </section>
-      <section className="upload-card">
-        <ImagePicker label="Choose person image" file={person} onPick={setPerson} onError={setError} />
-        {mode === "compose" && <ImagePicker label="Choose background image" file={background} onPick={setBackground} onError={setError} />}
-        <button className="primary" disabled={busy || !person || (mode === "compose" && !background)} onClick={run}>
-          {busy ? "Processing…" : `Continue · ${cost} ${cost === 1 ? "credit" : "credits"}`}
-        </button>
-        {error && <p className="notice">{error}</p>}
-      </section>
-      {result && <PredictionResult prediction={result} />}
-      {composition && <Composer item={composition} />}
-      {rechargeOpen && <RechargeModal credits={user.credits} cost={cost} busy={busy} onRecharge={recharge} onClose={() => setRechargeOpen(false)} />}
-    </main>
+    <>
+      <main className={!user && route !== "privacy" ? "auth" : undefined}>
+        {header}
+        {page}
+        {user && rechargeCost !== undefined && (
+          <RechargeModal credits={user.credits} cost={rechargeCost} busy={busy} onRecharge={recharge} onClose={() => setRechargeCost(undefined)} />
+        )}
+      </main>
+      <Footer />
+    </>
   );
 }

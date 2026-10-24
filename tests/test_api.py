@@ -8,6 +8,8 @@ from __future__ import annotations
 import io
 import os
 import uuid
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from PIL import Image, ImageDraw
@@ -40,10 +42,11 @@ if not ensure_test_database():
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from backend.app.db.models import RateLimitBucket, User  # noqa: E402
+from backend.app.db.models import CreditTransaction, LoginAttempt, Prediction, RateLimitBucket, User  # noqa: E402
 from backend.app.db.session import SessionLocal  # noqa: E402
 from backend.app.main import app  # noqa: E402
 from backend.app.services.inference import SegmentationResult  # noqa: E402
+from backend.app.services.retention import run_cleanup  # noqa: E402
 
 
 class FakeSegmentation:
@@ -100,7 +103,7 @@ def bucket_tokens(email: str) -> float:
 
 def test_register_gives_welcome_credits_and_duplicate_is_rejected(client) -> None:
     browser, email = new_user(client)
-    assert browser.get("/api/auth/me").json() == {"email": email, "credits": 30}
+    assert browser.get("/api/auth/me").json() == {"email": email, "credits": 30, "retention_days": 5}
     assert bucket_tokens(email) == 10
     duplicate = TestClient(app).post("/api/auth/register", json={"email": email.upper(), "password": "password123"})
     assert duplicate.status_code == 409
@@ -220,3 +223,101 @@ def test_failed_job_refunds_credits(client) -> None:
         app.state.segmentation.fail = False
     assert response.status_code == 500
     assert browser.get("/api/auth/me").json()["credits"] == 30
+
+
+# ---------- history, deletion, account erasure, login limit, retention, headers ----------
+
+
+def job_folder(media_url: str) -> Path:
+    """/media/<uuid>/cutout.png -> the uploads/<uuid> folder on disk."""
+    return settings.storage_dir / media_url.split("/")[2]
+
+
+def segment(browser: TestClient) -> dict:
+    response = browser.post("/api/predictions", files={"image": image_file()})
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_history_pages_and_items_can_be_deleted(client) -> None:
+    browser, _ = new_user(client)
+    first, second = segment(browser), segment(browser)
+    composition = browser.post(
+        "/api/compositions", files={"person_image": image_file(), "background_image": image_file()}
+    ).json()
+    page = browser.get("/api/predictions?limit=1").json()
+    assert page["total"] == 2 and len(page["items"]) == 1 and page["items"][0]["id"] == second["id"]  # newest first
+    assert browser.get("/api/predictions?limit=0").status_code == 422
+    listed = browser.get("/api/compositions").json()
+    assert listed["total"] == 1 and listed["items"][0]["id"] == composition["id"]
+    created = datetime.fromisoformat(listed["items"][0]["created_at"])
+    assert datetime.fromisoformat(listed["items"][0]["expires_at"]) - created == timedelta(days=5)
+
+    assert browser.delete(f"/api/predictions/{first['id']}").status_code == 204
+    assert not job_folder(first["cutout_url"]).exists()  # files are gone too
+    assert browser.get(first["cutout_url"]).status_code == 404
+    assert browser.get("/api/predictions").json()["total"] == 1
+    assert browser.delete(f"/api/predictions/{first['id']}").status_code == 404
+    assert browser.delete(f"/api/compositions/{composition['id']}").status_code == 204
+    assert browser.get("/api/compositions").json()["total"] == 0
+
+
+def test_cannot_delete_someone_elses_item(client) -> None:
+    owner, _ = new_user(client)
+    prediction = segment(owner)
+    stranger, _ = new_user(client)
+    assert stranger.delete(f"/api/predictions/{prediction['id']}").status_code == 404
+    assert owner.get(f"/api/predictions/{prediction['id']}").status_code == 200
+
+
+def test_login_is_blocked_after_five_failures(client) -> None:
+    _, email = new_user(client)
+    attacker = TestClient(app)
+    for _ in range(5):
+        assert attacker.post("/api/auth/login", json={"email": email, "password": "wrong-guess"}).status_code == 401
+    blocked = attacker.post("/api/auth/login", json={"email": email, "password": "password123"})
+    assert blocked.status_code == 429 and int(blocked.headers["Retry-After"]) > 0  # even the right password waits
+    with SessionLocal() as session:  # pretend 16 minutes have passed
+        session.query(LoginAttempt).update({LoginAttempt.created_at: datetime.now(UTC) - timedelta(minutes=16)})
+        session.commit()
+    assert attacker.post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 200
+
+
+def test_delete_account_erases_everything(client) -> None:
+    browser, email = new_user(client)
+    folder = job_folder(segment(browser)["cutout_url"])
+    assert browser.request("DELETE", "/api/auth/account", json={"password": "wrong-password"}).status_code == 403
+    assert browser.request("DELETE", "/api/auth/account", json={"password": "password123"}).status_code == 204
+    assert browser.get("/api/auth/me").status_code == 401
+    assert TestClient(app).post("/api/auth/login", json={"email": email, "password": "password123"}).status_code == 401
+    assert not folder.exists()
+    with SessionLocal() as session:
+        assert session.query(User).filter_by(email=email).count() == 0
+        orphans = session.query(CreditTransaction).outerjoin(User, CreditTransaction.user_id == User.id).filter(User.id.is_(None)).count()
+        assert orphans == 0  # ON DELETE CASCADE removed the ledger rows
+
+
+def test_cleanup_deletes_only_data_older_than_five_days(client) -> None:
+    browser, _ = new_user(client)
+    old, fresh = segment(browser), segment(browser)
+    six_days_ago = datetime.now(UTC) - timedelta(days=6)
+    with SessionLocal() as session:
+        session.query(Prediction).filter(Prediction.id == uuid.UUID(old["id"])).update({Prediction.created_at: six_days_ago})
+        session.commit()
+    os.utime(job_folder(old["cutout_url"]), (six_days_ago.timestamp(), six_days_ago.timestamp()))
+
+    report = run_cleanup()
+    assert report is not None and report.predictions >= 1 and report.folders >= 1
+    assert browser.get(f"/api/predictions/{old['id']}").status_code == 404
+    assert not job_folder(old["cutout_url"]).exists()
+    assert browser.get(f"/api/predictions/{fresh['id']}").status_code == 200
+    assert job_folder(fresh["cutout_url"]).exists()
+
+
+def test_security_headers_and_request_id(client) -> None:
+    response = client.get("/api/health")
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    assert len(response.headers["X-Request-ID"]) == 12
+    assert client.get("/api/health", headers={"X-Request-ID": "abc-123"}).headers["X-Request-ID"] == "abc-123"
+    assert client.get("/api/health", headers={"X-Request-ID": "<script>"}).headers["X-Request-ID"] != "<script>"

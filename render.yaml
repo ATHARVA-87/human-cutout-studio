@@ -15,4 +15,4 @@ services:
       - key: SEGMENTATION_COOKIE_SECURE
         value: "true" # the site is HTTPS, so the session cookie is HTTPS-only
       - key: MODEL_URL
-        value: https://huggingface.co/ATHARVA-87/human-cutout-unet/resolve/main/model.onnx
+        value: https://huggingface.co/SUPER-87/human-cutout-unet/resolve/main/model.onnx

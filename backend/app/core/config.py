@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     bucket_period_seconds: int = 30 * 60
     # CPU threads for the model. One keeps memory low and matches the free tier's 0.1 CPU.
     model_threads: int = 1
+    # Data retention: uploads, results and their history rows are deleted after this many days.
+    retention_days: int = 5
+    # How often the cleanup job runs while the server is awake (it also runs at every startup).
+    cleanup_interval_minutes: int = 60
+    # Brute-force protection: this many failed logins for one email within the window -> HTTP 429.
+    login_max_failures: int = 5
+    login_window_minutes: int = 15
 
 
 settings = Settings()

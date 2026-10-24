@@ -1,35 +1,30 @@
-"""Person segmentation routes: create a cutout, list your past results, fetch one result."""
+"""Person segmentation routes: create a cutout, list your history, open one result, delete one."""
 
 from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_owned, model_or_503
 from backend.app.db.models import Prediction, User
 from backend.app.db.session import get_session
 from backend.app.schemas import PredictionListResponse, PredictionResponse
 from backend.app.services.auth import current_user
-from backend.app.services.inference import SegmentationService
 from backend.app.services.jobs import SEGMENT_COST, run_paid_job
-from backend.app.services.storage import LocalStorage, media_url, read_image
+from backend.app.services.retention import expiry_of
+from backend.app.services.storage import LocalStorage, delete_job_folder, media_url, read_image
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
-
-
-def model_or_503(request: Request) -> SegmentationService:
-    service = getattr(request.app.state, "segmentation", None)
-    if service is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "The model is not loaded yet. Try again shortly.")
-    return service
 
 
 def to_response(prediction: Prediction, credits: int | None = None) -> PredictionResponse:
     return PredictionResponse(
         id=prediction.id,
         created_at=prediction.created_at,
+        expires_at=expiry_of(prediction.created_at),
         original_filename=prediction.original_filename,
         source_width=prediction.source_width,
         source_height=prediction.source_height,
@@ -78,9 +73,13 @@ async def create_prediction(
 
 
 @router.get("", response_model=PredictionListResponse)
-def list_predictions(limit: int = 20, offset: int = 0, session: Session = Depends(get_session), user: User = Depends(current_user)) -> PredictionListResponse:
-    if not 1 <= limit <= 100 or offset < 0:
-        raise HTTPException(422, "limit must be 1-100 and offset must be 0 or more.")
+def list_predictions(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+) -> PredictionListResponse:
+    """Newest first, one page at a time (offset pagination). Uses the (user_id, created_at) index."""
     items = session.scalars(
         select(Prediction).where(Prediction.user_id == user.id).order_by(Prediction.created_at.desc()).offset(offset).limit(limit)
     ).all()
@@ -90,8 +89,13 @@ def list_predictions(limit: int = 20, offset: int = 0, session: Session = Depend
 
 @router.get("/{prediction_id}", response_model=PredictionResponse)
 def get_prediction(prediction_id: UUID, session: Session = Depends(get_session), user: User = Depends(current_user)) -> PredictionResponse:
-    prediction = session.get(Prediction, prediction_id)
-    # 404 (not 403) for other users' results, so IDs of other people's work are not confirmed.
-    if prediction is None or prediction.user_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Prediction not found.")
-    return to_response(prediction)
+    return to_response(get_owned(session, Prediction, prediction_id, user))
+
+
+@router.delete("/{prediction_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_prediction(prediction_id: UUID, session: Session = Depends(get_session), user: User = Depends(current_user)) -> None:
+    prediction = get_owned(session, Prediction, prediction_id, user)
+    files = prediction.original_path
+    session.delete(prediction)
+    session.commit()
+    delete_job_folder(files)  # only after the commit: never delete files of a row that still exists
