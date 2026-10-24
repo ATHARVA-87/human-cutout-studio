@@ -1,11 +1,13 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { Composer } from "../components/Composer";
 import { PasswordInput } from "../components/PasswordInput";
 import { PredictionResult } from "../components/PredictionResult";
+import { href } from "../router";
 import type { Composition, Page, Prediction } from "../types";
 
 type Tab = "cutouts" | "compositions";
+type Item = Prediction | Composition;
 
 interface HistoryPageProps {
   retentionDays: number;
@@ -17,14 +19,40 @@ function daysLeft(expiresAt: string): number {
   return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
 }
 
+function deletionText(expiresAt: string): string {
+  const days = daysLeft(expiresAt);
+  if (days <= 0) return "Deleted today";
+  return days === 1 ? "Deleted tomorrow" : `Deleted in ${days} days`;
+}
+
+/** "Today", "Yesterday", or a date: the heading for each group of items. */
+function dayLabel(createdAt: string): string {
+  const day = new Date(createdAt);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (day.toDateString() === today.toDateString()) return "Today";
+  if (day.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return day.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+}
+
+function groupByDay<T extends Item>(items: T[]): [string, T[]][] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const label = dayLabel(item.created_at);
+    groups.set(label, [...(groups.get(label) ?? []), item]);
+  }
+  return [...groups.entries()];
+}
+
 /** Thumbnail that shows a placeholder if the file is gone (deleted, or the free server restarted). */
 function Thumb({ src, checkerboard = false }: { src: string; checkerboard?: boolean }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return <div className="thumb missing">Image no longer available</div>;
+  if (failed) return <div className="thumb missing">This image is no longer on the server</div>;
   return <img className={checkerboard ? "thumb checkerboard" : "thumb"} src={src} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-/** Past uploads and results of the signed-in user, newest first, plus "Your data" (delete account). */
+/** Past uploads and results of the signed-in user, newest first, plus account deletion. */
 export function HistoryPage({ retentionDays, onApiError, onAccountDeleted }: HistoryPageProps) {
   const [tab, setTab] = useState<Tab>("cutouts");
   const [predictions, setPredictions] = useState<Page<Prediction>>({ items: [], total: 0 });
@@ -32,6 +60,7 @@ export function HistoryPage({ retentionDays, onApiError, onAccountDeleted }: His
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [openId, setOpenId] = useState<string>();
+  const openRef = useRef<HTMLElement>(null);
 
   // Load the first page of both lists when the page opens.
   useEffect(() => {
@@ -43,6 +72,11 @@ export function HistoryPage({ retentionDays, onApiError, onAccountDeleted }: His
       .catch((caught) => setError(onApiError(caught)))
       .finally(() => setLoading(false));
   }, []); // empty list: load once when the page opens
+
+  // Bring an opened item into view.
+  useEffect(() => {
+    if (openId) openRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [openId]);
 
   const loadMore = async () => {
     try {
@@ -59,7 +93,7 @@ export function HistoryPage({ retentionDays, onApiError, onAccountDeleted }: His
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm("Delete this item and its images permanently?")) return;
+    if (!window.confirm("Delete this item and its images? This can't be undone.")) return;
     try {
       if (tab === "cutouts") {
         await api.deletePrediction(id);
@@ -74,91 +108,97 @@ export function HistoryPage({ retentionDays, onApiError, onAccountDeleted }: His
     }
   };
 
-  const page = tab === "cutouts" ? predictions : compositions;
+  const switchTab = (next: Tab) => {
+    setTab(next);
+    setOpenId(undefined);
+  };
+
+  const page: Page<Item> = tab === "cutouts" ? predictions : compositions;
   const openPrediction = predictions.items.find((item) => item.id === openId);
   const openComposition = compositions.items.find((item) => item.id === openId);
 
   return (
     <>
-      <section className="hero compact">
-        <p className="eyebrow">Your work</p>
-        <h1>History</h1>
-        <p>Uploads and results are kept for {retentionDays} days, then deleted automatically.</p>
+      <section className="page-head">
+        <h1 className="page-title">History</h1>
+        <p>Everything you made in the last {retentionDays} days. After that it's deleted automatically, so download what you want to keep.</p>
       </section>
 
-      <section className="operations" role="tablist">
-        <button role="tab" aria-selected={tab === "cutouts"} className={tab === "cutouts" ? "operation selected" : "operation"} onClick={() => setTab("cutouts")}>
-          Cutouts<small>{predictions.total} saved</small>
+      <div className="tabs" role="tablist" aria-label="Kind of result">
+        <button role="tab" aria-selected={tab === "cutouts"} onClick={() => switchTab("cutouts")}>
+          Cutouts<span className="count">{predictions.total}</span>
         </button>
-        <button
-          role="tab"
-          aria-selected={tab === "compositions"}
-          className={tab === "compositions" ? "operation selected" : "operation"}
-          onClick={() => setTab("compositions")}
-        >
-          Compositions<small>{compositions.total} saved</small>
+        <button role="tab" aria-selected={tab === "compositions"} onClick={() => switchTab("compositions")}>
+          Placed on photos<span className="count">{compositions.total}</span>
         </button>
-      </section>
+      </div>
 
-      {error && <p className="notice">{error}</p>}
+      {error && (
+        <p className="notice" role="alert">
+          {error}
+        </p>
+      )}
+
+      {(openPrediction || openComposition) && (
+        <section className="mat history-open" ref={openRef} aria-label="Opened item">
+          {tab === "cutouts" && openPrediction && <PredictionResult prediction={openPrediction} />}
+          {tab === "compositions" && openComposition && <Composer item={openComposition} />}
+        </section>
+      )}
+
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="soft">Loading your history…</p>
       ) : page.items.length === 0 ? (
-        <p className="muted">Nothing here yet. Results you create appear here for {retentionDays} days.</p>
+        <div className="empty-state">
+          <strong>{tab === "cutouts" ? "No cutouts yet" : "Nothing placed on a photo yet"}</strong>
+          <p className="soft">Results you make appear here for {retentionDays} days.</p>
+          <a className="button primary" href={href("create")}>
+            Make one now
+          </a>
+        </div>
       ) : (
-        <ul className="history-grid">
-          {tab === "cutouts"
-            ? predictions.items.map((item) => (
-                <li key={item.id} className={openId === item.id ? "history-card open" : "history-card"}>
-                  <Thumb src={item.overlay_url} />
-                  <strong title={item.original_filename}>{item.original_filename}</strong>
-                  <small>
-                    {new Date(item.created_at).toLocaleString()} · deleted in {daysLeft(item.expires_at)} d
-                  </small>
-                  <div className="card-actions">
-                    <button className="plain" onClick={() => setOpenId(openId === item.id ? undefined : item.id)}>
-                      {openId === item.id ? "Close" : "Open"}
-                    </button>
-                    <button className="plain danger" onClick={() => void remove(item.id)}>
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))
-            : compositions.items.map((item) => (
-                <li key={item.id} className={openId === item.id ? "history-card open" : "history-card"}>
-                  <Thumb src={item.cutout_url} checkerboard />
-                  <strong>Composition</strong>
-                  <small>
-                    {new Date(item.created_at).toLocaleString()} · deleted in {daysLeft(item.expires_at)} d
-                  </small>
-                  <div className="card-actions">
-                    <button className="plain" onClick={() => setOpenId(openId === item.id ? undefined : item.id)}>
-                      {openId === item.id ? "Close" : "Edit again"}
-                    </button>
-                    <button className="plain danger" onClick={() => void remove(item.id)}>
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
-        </ul>
+        groupByDay(page.items).map(([label, items]) => (
+          <section className="day-group" key={label}>
+            <h2>{label}</h2>
+            <ul className="contact-sheet">
+              {items.map((item) => {
+                const isCutout = tab === "cutouts";
+                const title = isCutout ? (item as Prediction).original_filename : "Person placed on a photo";
+                const open = openId === item.id;
+                return (
+                  <li key={item.id} className={open ? "frame open" : "frame"}>
+                    <Thumb src={isCutout ? (item as Prediction).overlay_url : item.cutout_url} checkerboard={!isCutout} />
+                    <strong title={title}>{title}</strong>
+                    <span className="small soft">
+                      Made at {new Date(item.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}. {deletionText(item.expires_at)}.
+                    </span>
+                    <div className="frame-actions">
+                      <button className="button quiet" onClick={() => setOpenId(open ? undefined : item.id)} aria-expanded={open}>
+                        {open ? "Close" : isCutout ? "Open" : "Edit again"}
+                      </button>
+                      <button className="button quiet" onClick={() => void remove(item.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))
       )}
       {page.items.length < page.total && (
-        <button className="plain load-more" onClick={() => void loadMore()}>
-          Load more
+        <button className="button secondary" onClick={() => void loadMore()}>
+          Show older items
         </button>
       )}
-
-      {tab === "cutouts" && openPrediction && <PredictionResult prediction={openPrediction} />}
-      {tab === "compositions" && openComposition && <Composer item={openComposition} />}
 
       <DeleteAccount onApiError={onApiError} onDeleted={onAccountDeleted} />
     </>
   );
 }
 
-/** "Your data": permanently delete the account after re-entering the password. */
+/** Permanently delete the account after re-entering the password. */
 function DeleteAccount({ onApiError, onDeleted }: { onApiError: (caught: unknown) => string | undefined; onDeleted: () => void }) {
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -167,7 +207,7 @@ function DeleteAccount({ onApiError, onDeleted }: { onApiError: (caught: unknown
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!password) return setError("Enter your password to confirm.");
+    if (!password) return setError("Enter your password to confirm it's you.");
     setBusy(true);
     try {
       await api.deleteAccount(password);
@@ -179,29 +219,35 @@ function DeleteAccount({ onApiError, onDeleted }: { onApiError: (caught: unknown
   };
 
   return (
-    <section className="result-card danger-zone">
-      <p className="eyebrow">Your data</p>
-      <h2>Delete account</h2>
-      <p className="muted">
-        This permanently deletes your account, credits and every upload and result. It cannot be undone. See the{" "}
-        <a href="#/privacy">Privacy Notice</a> for what we store.
+    <section className="danger-zone" aria-labelledby="delete-account">
+      <h2 id="delete-account">Delete your account</h2>
+      <p className="soft">
+        This removes your account, credits and everything you made, right away. It can't be undone. The{" "}
+        <a href={href("privacy")}>privacy notice</a> lists what we store.
       </p>
       {!open ? (
-        <button className="plain danger" onClick={() => setOpen(true)}>
-          Delete my account…
+        <button className="button destructive" onClick={() => setOpen(true)}>
+          Delete my account
         </button>
       ) : (
         <form className="confirm-form" onSubmit={submit}>
-          <PasswordInput value={password} onChange={setPassword} placeholder="Your password" />
-          <div className="modal-actions">
-            <button className="primary danger" type="submit" disabled={busy}>
-              Permanently delete
+          <label htmlFor="confirm-password" className="small">
+            Enter your password to confirm
+          </label>
+          <PasswordInput id="confirm-password" value={password} onChange={setPassword} />
+          <div className="confirm-actions">
+            <button className="button destructive" type="submit" disabled={busy}>
+              Delete everything permanently
             </button>
-            <button className="plain" type="button" disabled={busy} onClick={() => setOpen(false)}>
-              Cancel
+            <button className="button quiet" type="button" disabled={busy} onClick={() => setOpen(false)}>
+              Keep my account
             </button>
           </div>
-          {error && <p className="notice">{error}</p>}
+          {error && (
+            <p className="notice" role="alert">
+              {error}
+            </p>
+          )}
         </form>
       )}
     </section>

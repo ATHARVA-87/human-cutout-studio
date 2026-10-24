@@ -1,4 +1,4 @@
-import { type PointerEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
 import type { Composition } from "../types";
 
 /** Where the person is, in BACKGROUND-IMAGE pixels: bottom-centre point (their feet) and height. */
@@ -150,47 +150,74 @@ export function Composer({ item }: { item: Composition }) {
     anchor.click();
   };
 
+  /** Keyboard editing (accessibility): arrows move the person, + and - resize. Shift moves further. */
+  const onKeyDown = (event: KeyboardEvent<HTMLCanvasElement>) => {
+    if (!images || !place) return;
+    const { naturalWidth: sceneWidth, naturalHeight: sceneHeight } = images.background;
+    const step = (event.shiftKey ? 0.05 : 0.01) * sceneWidth;
+    const moves: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (event.key in moves) {
+      event.preventDefault();
+      const [dx, dy] = moves[event.key];
+      const x = Math.min(sceneWidth, Math.max(0, place.x + dx));
+      const bottom = item.anchor_bottom ? sceneHeight : Math.min(sceneHeight + place.height / 2, Math.max(place.height * 0.2, place.bottom + dy));
+      setPlace({ ...place, x, bottom });
+    } else if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      resize(1.08);
+    } else if (event.key === "-") {
+      event.preventDefault();
+      resize(1 / 1.08);
+    }
+  };
+
   const sizePercent = images && place ? Math.round((place.height / images.background.naturalHeight) * 100) : 0;
 
   return (
-    <section className="result-card">
-      <div className="result-heading">
-        <div>
-          <p className="eyebrow">Compose</p>
-          <h2>Place your cutout</h2>
-        </div>
-        <button className="mirror" onClick={() => setMirrored((value) => !value)}>
-          ↔ Mirror
-        </button>
+    <div className="result-card">
+      <div className="mat-head">
+        <h2>Place the person</h2>
+        <p>{item.anchor_bottom ? "Their photo was cut off at the bottom, so they stay on the bottom edge." : "A soft shadow keeps their feet on the ground."}</p>
       </div>
       <div className="canvas-frame">
         <canvas
           ref={canvasRef}
           className="canvas"
+          tabIndex={0}
+          aria-label="Editor. Drag the person, or use the arrow keys to move and plus or minus to resize."
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={stopDragging}
           onPointerCancel={stopDragging}
+          onKeyDown={onKeyDown}
         />
       </div>
-      {loadError && <p className="notice">{loadError}</p>}
-      <label className="size-control">
-        Size {sizePercent}%
-        <input
-          type="range"
-          min={MIN_HEIGHT * 100}
-          max={MAX_HEIGHT * 100}
-          value={sizePercent}
-          onChange={(event) => images && setPlace((current) => current && { ...current, height: (Number(event.target.value) / 100) * images.background.naturalHeight })}
-        />
-      </label>
-      <p className="muted">
-        Drag the person to move them. Scroll over the image or use the slider to resize.
-        {item.anchor_bottom && " This photo cuts the person off at the bottom, so they stay on the bottom edge."}
-      </p>
-      <button className="primary" onClick={download} disabled={!images}>
-        Download image
-      </button>
-    </section>
+      {loadError && (
+        <p className="notice" role="alert">
+          {loadError}
+        </p>
+      )}
+      <div className="toolbar">
+        <button className="button on-mat-outline" onClick={() => setMirrored((value) => !value)} aria-pressed={mirrored}>
+          Mirror
+        </button>
+        <label className="size-control">
+          <span>Size {sizePercent}%</span>
+          <input
+            type="range"
+            min={MIN_HEIGHT * 100}
+            max={MAX_HEIGHT * 100}
+            value={sizePercent}
+            onChange={(event) =>
+              images && setPlace((current) => current && { ...current, height: (Number(event.target.value) / 100) * images.background.naturalHeight })
+            }
+          />
+        </label>
+        <button className="button on-mat" onClick={download} disabled={!images}>
+          Download image
+        </button>
+      </div>
+      <p className="editor-hint">Drag the person to move them. Scroll over the photo or use the slider to resize. Arrow keys work too.</p>
+    </div>
   );
 }

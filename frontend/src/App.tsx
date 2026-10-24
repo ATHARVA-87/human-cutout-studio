@@ -135,13 +135,11 @@ export default function App() {
 
   return (
     <>
-      <main className={!user && route !== "privacy" ? "auth" : undefined}>
-        {header}
-        {page}
-        {user && rechargeCost !== undefined && (
-          <RechargeModal credits={user.credits} cost={rechargeCost} busy={busy} onRecharge={recharge} onClose={() => setRechargeCost(undefined)} />
-        )}
-      </main>
+      {header}
+      <main className="shell">{page}</main>
+      {user && rechargeCost !== undefined && (
+        <RechargeModal credits={user.credits} cost={rechargeCost} busy={busy} onRecharge={recharge} onClose={() => setRechargeCost(undefined)} />
+      )}
       <Footer />
     </>
   );

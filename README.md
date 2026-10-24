@@ -16,7 +16,7 @@ A U-Net trained from scratch to separate people from the background, served as a
 - **Accounts and credits**: 30 free credits on sign-up, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
 - **Privacy by design**: a full [Privacy Notice](frontend/src/pages/PrivacyPage.tsx) page. Uploads and results are **deleted automatically after 5 days**. Self-service account deletion. One strictly necessary cookie, no trackers, self-hosted fonts.
 - **Security**: salted password hashing, hashed session tokens, HTTP-only cookies, a limit of 5 failed sign-ins per 15 minutes, per-user access checks, a strict Content Security Policy and security headers, and a request ID on every response.
-- Light and dark theme, and a show/hide password toggle.
+- **Design**: a cutting-mat workspace, the editor's "marching ants" selection and the transparency checkerboard as the visual language. Light and dark theme, a show/hide password toggle, drag-and-drop uploads, and full keyboard support including the editor.
 
 ## Model results
 

@@ -335,7 +335,7 @@ One middleware wraps every request:
   - `Strict-Transport-Security` in production (HTTPS only);
   - **Content Security Policy:** scripts, styles, fonts and API calls may come **only from this site** (`'self'`), with no inline scripts, `object-src 'none'` and `frame-ancestors 'none'`. Even if an attacker injected HTML, the browser would refuse to load their script or send data elsewhere.
   - `/docs` is excluded because FastAPI's docs page loads from a CDN.
-- **Fonts are self-hosted** (`@fontsource/*` packages bundled by Vite) instead of Google Fonts. The CSP can then stay strict, and no visitor IP addresses go to a third party, which matters for privacy law.
+- **The font is self-hosted** (`@fontsource-variable/archivo`, bundled by Vite) instead of loaded from Google Fonts. The CSP can then stay strict, and no visitor IP addresses go to a third party, which matters for privacy law.
 
 ### 7.13 Privacy by design ([pages/PrivacyPage.tsx](frontend/src/pages/PrivacyPage.tsx))
 The Privacy Notice reflects how the code actually behaves (an interviewer may check this):
@@ -407,7 +407,7 @@ login_attempts                       (email_hash + created_at; no foreign key: a
   - `AuthScreen` (form + validation + privacy line);
   - `PasswordInput` (Show/Hide toggles `type="password"` ↔ `type="text"`; the button is `type="button"` so it doesn't submit the form);
   - `Header` (nav, credits, recharge, theme, logout), `Footer` (privacy and source links);
-  - `ImagePicker` (JPG/PNG ≤ 10 MB check);
+  - `ImagePicker` (click, keyboard or drag-and-drop; JPG/PNG ≤ 10 MB check; shows a preview of the chosen photo);
   - `RechargeModal`;
   - `PredictionResult` (4 images + downloads);
   - `Composer` (the canvas editor).
@@ -433,7 +433,37 @@ login_attempts                       (email_hash + created_at; no foreign key: a
 - **Full-body:** a soft blurred shadow ellipse is drawn under the feet first.
 - **Download:** `canvas.toDataURL("image/png")`, which is exactly what you see.
 
-**Theme.** Colours are CSS variables on `:root`, and `[data-theme="light"]` overrides them. Secondary buttons always have white text. The logo is white in dark mode and dark green (`#14532d`) in light mode. `transition: color/background-color .3s` makes the switch smooth (disabled for users who prefer reduced motion).
+**Theme.** Colours are CSS variables (`--page`, `--text`, `--mat`, …) defined twice, under `[data-theme="dark"]` and `[data-theme="light"]`. Components only use the variables, so switching theme is one attribute change. Secondary buttons always have white text. The logo is dark green in light mode. `transition: color/background-color .3s` makes the switch smooth.
+
+### 9.1 Visual design (how I'd explain it)
+The redesign followed Anthropic's *frontend-design* skill: write a short design plan first (palette, type, wireframes, principles), check it for "generic AI-looking" defaults, build, then critique with screenshots.
+- **Idea:** the app cuts people out of photos, so the look comes from that world. A green **self-healing cutting mat** is the workspace where results appear (the grid lines are its ruling). The editor's dashed **"marching ants" selection** marks the upload areas. The grey-white **transparency checkerboard** appears only behind things that really are transparent.
+- **Palette (6 named colours):**
+
+  | Name | Hex | Use |
+  | --- | --- | --- |
+  | Mat | `#1D5A43` | brand, primary actions, light-mode logo |
+  | Mat night | `#113528` | dark-mode page |
+  | Gridline | `#5FA884` | mat lines |
+  | Paper | `#F5F5F0` | light page |
+  | Ink | `#171717` | text |
+  | Blade | `#FF6B1A` | scalpel orange, used **only** for focus rings, selection handles and "out of credits" |
+
+- **Type:** one variable font, **Archivo**. Its width axis gives expanded 125% for headlines, 100% for body text and 85% for small text, so there's no need for 3 fonts or monospace labels.
+- **Signature moment:** on the sign-in page, a selection rectangle draws around the word "out", then the letters turn into the transparency checkerboard: the word gets "cut out". That's the only load animation. Upload areas' ants march only on hover or drag (motion that responds to the user). `prefers-reduced-motion` turns everything off.
+- **Copy and structure:**
+  - plain sentences in sentence case;
+  - errors say what happened *and* how to fix it ("That photo is over 10 MB. Choose a smaller one or resize it first.");
+  - empty states invite action ("No cutouts yet… Make one now");
+  - numbers only where there's a real sequence (the 3 steps on the Create page);
+  - History is grouped under "Today / Yesterday" headings, which carry information.
+- **Accessibility checks done:**
+  - visible orange focus ring on every control;
+  - real `<label>`s on inputs;
+  - mode choice uses real radio buttons;
+  - the upload input is visually hidden (not `display:none`), so keyboard users can reach it;
+  - **the editor works with the keyboard** (Tab to it; arrows move, Shift moves further, + and − resize);
+  - no sideways scrolling at phone width (390 px).
 
 ---
 
@@ -654,7 +684,6 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 - **Offset pagination** gets slow for very deep pages; switch to keyset pagination at scale.
 - **No migrations:** add Alembic before real users.
 - **Realism:** no perspective or light-direction matching.
-- **Accessibility:** the editor needs a keyboard way to move the person.
 
 ---
 

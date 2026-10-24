@@ -10,16 +10,16 @@ interface RechargeModalProps {
 export function RechargeModal({ credits, cost, busy, onRecharge, onClose }: RechargeModalProps) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="recharge-title">
-      <div className="modal">
-        <h2 id="recharge-title">Out of credits</h2>
-        <p className="muted">
-          You have {credits} {credits === 1 ? "credit" : "credits"}; this action needs {cost}. Recharge to add 30 free demo credits.
+      <div className="panel modal">
+        <h2 id="recharge-title">You're out of credits</h2>
+        <p className="soft">
+          This needs {cost} {cost === 1 ? "credit" : "credits"} and you have {credits}. Recharge to get 30 free demo credits, then try again.
         </p>
-        <div className="modal-actions">
-          <button className="primary" onClick={onRecharge} disabled={busy}>
+        <div className="confirm-actions">
+          <button className="button primary" onClick={onRecharge} disabled={busy} autoFocus>
             Recharge 30 credits
           </button>
-          <button className="plain" onClick={onClose} disabled={busy}>
+          <button className="button quiet" onClick={onClose} disabled={busy}>
             Not now
           </button>
         </div>

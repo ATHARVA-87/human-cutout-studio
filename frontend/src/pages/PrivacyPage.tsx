@@ -7,9 +7,8 @@ const CONTACT_URL = "https://github.com/ATHARVA-87";
 export function PrivacyPage() {
   return (
     <article className="legal">
-      <p className="eyebrow">Legal</p>
-      <h1>Privacy Notice</h1>
-      <p className="muted">Last updated: {LAST_UPDATED}</p>
+      <h1 className="page-title">Privacy notice</h1>
+      <p className="soft">Last updated {LAST_UPDATED}</p>
 
       <p>
         Human Cutout is a free, non-commercial portfolio project that cuts people out of photos with a machine-learning model. This

@@ -1,43 +1,42 @@
 import type { Prediction } from "../types";
 
+/** A segmentation result, shown on the mat: the cutout first, then how the model saw the photo. */
 export function PredictionResult({ prediction }: { prediction: Prediction }) {
   const images = [
-    ["Original", prediction.original_url],
-    ["Overlay", prediction.overlay_url],
-    ["Person mask", prediction.mask_url],
-    ["Cutout", prediction.cutout_url],
-  ] as const;
+    { label: "Cutout on a transparent background", url: prediction.cutout_url, transparent: true },
+    { label: "What the model marked as person", url: prediction.overlay_url, transparent: false },
+    { label: "Mask (white is person)", url: prediction.mask_url, transparent: false },
+    { label: "Your original photo", url: prediction.original_url, transparent: false },
+  ];
+  const percent = Math.round(prediction.foreground_fraction * 100);
   return (
-    <section className="result-card">
-      <div className="result-heading">
-        <div>
-          <p className="eyebrow">Result</p>
-          <h2>{prediction.original_filename}</h2>
-        </div>
-        <span className="metric">{(prediction.foreground_fraction * 100).toFixed(1)}% person</span>
+    <div className="result-card">
+      <div className="mat-head">
+        <h2>{prediction.original_filename}</h2>
+        <p>The person fills about {percent}% of the photo.</p>
       </div>
       <div className="result-grid">
-        {images.map(([label, url]) => (
+        {images.map(({ label, url, transparent }) => (
           <figure key={label}>
-            <img src={url} alt={label} className={label === "Cutout" ? "checkerboard" : undefined} />
+            <img src={url} alt={label} className={transparent ? "checkerboard" : undefined} />
             <figcaption>{label}</figcaption>
           </figure>
         ))}
       </div>
-      <p className="muted result-meta">
-        {prediction.source_width} × {prediction.source_height} · {prediction.model_version}
-      </p>
       <div className="download-row">
-        <a className="primary" href={prediction.cutout_url} download="person-cutout.png">
+        <a className="button on-mat" href={prediction.cutout_url} download="person-cutout.png">
           Download cutout
         </a>
-        <a className="primary" href={prediction.mask_url} download="person-mask.png">
+        <a className="button on-mat-outline" href={prediction.mask_url} download="person-mask.png">
           Download mask
         </a>
-        <a className="primary" href={prediction.overlay_url} download="person-overlay.png">
+        <a className="button on-mat-outline" href={prediction.overlay_url} download="person-overlay.png">
           Download overlay
         </a>
       </div>
-    </section>
+      <p className="result-meta">
+        Processed at {prediction.source_width} by {prediction.source_height} pixels with model {prediction.model_version}.
+      </p>
+    </div>
   );
 }

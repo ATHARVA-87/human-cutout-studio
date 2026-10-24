@@ -51,30 +51,74 @@ export function CreatePage({ user, busy, setBusy, onCredits, onNeedCredits, onAp
     }
   };
 
+  const ready = Boolean(person && (mode === "segment" || background));
+  const action = mode === "segment" ? "Cut out the person" : "Cut out and place";
+
   return (
     <>
-      <section className="hero">
-        <p className="eyebrow">Welcome back</p>
-        <h1>What would you like to create?</h1>
+      <section className="page-head">
+        <h1 className="page-title">Make a cutout</h1>
+        <p>Pick what you want, add your photo, and the model finds the person. Results show up on the mat.</p>
       </section>
-      <section className="operations">
-        <button className={mode === "segment" ? "operation selected" : "operation"} onClick={() => setMode("segment")}>
-          Person segmentation<small>{SEGMENT_COST} credit · mask and cutout</small>
-        </button>
-        <button className={mode === "compose" ? "operation selected" : "operation"} onClick={() => setMode("compose")}>
-          Combine with another image<small>{COMPOSE_COST} credits · position and edit</small>
-        </button>
-      </section>
-      <section className="upload-card">
-        <ImagePicker label="Choose person image" file={person} onPick={setPerson} onError={setError} />
-        {mode === "compose" && <ImagePicker label="Choose background image" file={background} onPick={setBackground} onError={setError} />}
-        <button className="primary" disabled={busy || !person || (mode === "compose" && !background)} onClick={run}>
-          {busy ? "Processing…" : `Continue · ${cost} ${cost === 1 ? "credit" : "credits"}`}
-        </button>
-        {error && <p className="notice">{error}</p>}
-      </section>
-      {result && <PredictionResult prediction={result} />}
-      {composition && <Composer item={composition} />}
+
+      <div className="workbench">
+        <ol className="steps">
+          <li className="step">
+            <span className="step-number" aria-hidden="true">1</span>
+            <h2 id="step-choose">Choose what to make</h2>
+            <div className="step-body" role="radiogroup" aria-labelledby="step-choose">
+              <label className="choice">
+                <input type="radio" name="mode" checked={mode === "segment"} onChange={() => setMode("segment")} />
+                <strong>Cut out a person</strong>
+                <span>{SEGMENT_COST} credit. You get a mask, an overlay and a transparent cutout.</span>
+              </label>
+              <label className="choice">
+                <input type="radio" name="mode" checked={mode === "compose"} onChange={() => setMode("compose")} />
+                <strong>Place a person on another photo</strong>
+                <span>{COMPOSE_COST} credits. Then move, resize and mirror them in the editor.</span>
+              </label>
+            </div>
+          </li>
+          <li className="step">
+            <span className="step-number" aria-hidden="true">2</span>
+            <h2>{mode === "segment" ? "Add your photo" : "Add both photos"}</h2>
+            <div className="step-body">
+              <ImagePicker label="Photo with a person" file={person} onPick={setPerson} onError={setError} />
+              {mode === "compose" && <ImagePicker label="New background" file={background} onPick={setBackground} onError={setError} />}
+            </div>
+          </li>
+          <li className="step">
+            <span className="step-number" aria-hidden="true">3</span>
+            <h2>Cut it out</h2>
+            <div className="step-body">
+              <button className="button primary wide" disabled={busy || !ready} onClick={run}>
+                {busy ? "Cutting…" : `${action} (${cost} ${cost === 1 ? "credit" : "credits"})`}
+              </button>
+              {!ready && !busy && <p className="small soft">{mode === "segment" ? "Add a photo first." : "Add both photos first."}</p>}
+              {error && (
+                <p className="notice" role="alert">
+                  {error}
+                </p>
+              )}
+            </div>
+          </li>
+        </ol>
+
+        <section className="mat" aria-live="polite" aria-label="Result">
+          {result && <PredictionResult prediction={result} />}
+          {composition && <Composer item={composition} />}
+          {!result && !composition && (
+            <div className="mat-empty">
+              <strong>{busy ? "Cutting out the person…" : "Your result appears here"}</strong>
+              <span>
+                {busy
+                  ? "This takes a few seconds."
+                  : "Start with a photo where the person is clearly visible. Full-body shots work best for placing on a new background."}
+              </span>
+            </div>
+          )}
+        </section>
+      </div>
     </>
   );
 }
