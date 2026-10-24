@@ -89,6 +89,9 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
             <label htmlFor="password">Password</label>
           </span>
           <PasswordInput id="password" placeholder="At least 8 characters" value={password} onChange={setPassword} />
+          <a className="small forgot-link" href={href("forgot")}>
+            Forgot your password?
+          </a>
         </div>
         {error && (
           <p className="notice" role="alert">

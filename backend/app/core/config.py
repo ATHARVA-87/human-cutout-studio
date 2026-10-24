@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,6 +41,27 @@ class Settings(BaseSettings):
     login_failures_per_ip: int = 20
     # Secret mixed into IP hashes so stored hashes can't be reversed by hashing every possible IP.
     ip_hash_salt: str = "local-development-only"
+
+    # The site's own address, used to build links in emails. It is configured, never taken from the
+    # request's Host header (an attacker could fake that header and receive someone's reset link).
+    # On Render, RENDER_EXTERNAL_URL (set automatically, e.g. https://human-cutout.onrender.com) is used.
+    public_url: str = Field(
+        default="http://localhost:8000", validation_alias=AliasChoices("SEGMENTATION_PUBLIC_URL", "RENDER_EXTERNAL_URL")
+    )
+    # How emails are sent: "console" (written to the log; tests and fallback), "smtp" (e.g. the local
+    # Mailpit inbox), or "brevo" (Brevo's HTTPS API; Render's free plan blocks SMTP ports).
+    email_backend: str = "console"
+    email_from: str = "no-reply@example.com"  # with Brevo: a sender address you verified in Brevo
+    email_from_name: str = "Human Cutout"
+    smtp_host: str = "localhost"
+    smtp_port: int = 1025
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = False
+    brevo_api_key: str = ""
+    # Lifetimes of the links sent by email
+    verify_token_hours: int = 24
+    reset_token_minutes: int = 30
 
 
 settings = Settings()

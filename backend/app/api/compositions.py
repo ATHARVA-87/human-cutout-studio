@@ -12,7 +12,7 @@ from backend.app.api.deps import get_owned, model_or_503
 from backend.app.db.models import Composition, CompositionPlacement, User
 from backend.app.db.session import get_session
 from backend.app.schemas import CompositionListResponse, CompositionResponse, Placement
-from backend.app.services.auth import current_user
+from backend.app.services.auth import current_user, verified_user
 from backend.app.services.jobs import COMPOSE_COST, run_paid_job
 from backend.app.services.realism import crop_to_person, match_colors, touches_bottom
 from backend.app.services.retention import expiry_of
@@ -26,8 +26,8 @@ def to_response(composition: Composition, placement: CompositionPlacement | None
         id=composition.id,
         created_at=composition.created_at,
         expires_at=expiry_of(composition.created_at),
-        background_url=media_url(composition.background_path),
-        cutout_url=media_url(composition.cutout_path),
+        background_url=media_url("compositions", composition.id, "background"),
+        cutout_url=media_url("compositions", composition.id, "cutout"),
         anchor_bottom=composition.anchor_bottom,
         placement=Placement(x=placement.x, bottom=placement.bottom, height=placement.height, mirrored=placement.mirrored)
         if placement
@@ -42,7 +42,7 @@ async def create_composition(
     person_image: UploadFile = File(...),
     background_image: UploadFile = File(...),
     session: Session = Depends(get_session),
-    user: User = Depends(current_user),
+    user: User = Depends(verified_user),  # signed in AND email confirmed
 ) -> CompositionResponse:
     person, background = await read_image(person_image), await read_image(background_image)
     service = model_or_503(request)

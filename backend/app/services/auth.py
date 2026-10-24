@@ -8,12 +8,12 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException, Request, Response, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
-from backend.app.db.models import SessionToken, User
+from backend.app.db.models import EmailToken, SessionToken, User
 from backend.app.db.session import get_session
 
 COOKIE_NAME = "human_cutout_session"
@@ -100,3 +100,65 @@ def current_user(request: Request, session: Session = Depends(get_session)) -> U
             status.HTTP_401_UNAUTHORIZED, "Your session ended (it expired or you signed in elsewhere). Please sign in again."
         )
     return user
+
+
+def verified_user(user: User = Depends(current_user)) -> User:
+    """FastAPI dependency for paid jobs: signed in AND email confirmed, or HTTP 403."""
+    if not user.email_verified:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Confirm your email address first. Check your inbox for the link, or send a new one."
+        )
+    return user
+
+
+# ---------------------------------------------------------------------------------------------
+# One-time email links (verify email / reset password)
+# ---------------------------------------------------------------------------------------------
+
+
+def create_email_token(session: Session, user: User, purpose: str, lifetime: timedelta) -> str:
+    """Make a random single-use token, store only its hash, and return the raw token for the email link.
+
+    Older unused links of the same purpose are expired (not deleted), so only the newest link works while
+    the old rows still count towards the sending limit. Does NOT commit: the caller commits.
+    """
+    session.execute(
+        update(EmailToken)
+        .where(EmailToken.user_id == user.id, EmailToken.purpose == purpose, EmailToken.used_at.is_(None))
+        .values(expires_at=datetime.now(UTC))
+    )
+    token = secrets.token_urlsafe(32)
+    session.add(EmailToken(user_id=user.id, purpose=purpose, token_hash=hash_token(token), expires_at=datetime.now(UTC) + lifetime))
+    return token
+
+
+def use_email_token(session: Session, token: str, purpose: str) -> User:
+    """Check a token from an email link and mark it used. Wrong, expired or reused -> HTTP 400.
+
+    SELECT ... FOR UPDATE locks the token row, so two simultaneous clicks can't both use it.
+    """
+    entry = session.scalar(
+        select(EmailToken)
+        .where(EmailToken.token_hash == hash_token(token), EmailToken.purpose == purpose, EmailToken.used_at.is_(None))
+        .with_for_update()
+    )
+    if entry is None or entry.expires_at <= datetime.now(UTC):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This link is invalid or has expired. Request a new one.")
+    entry.used_at = datetime.now(UTC)
+    user = session.get(User, entry.user_id)
+    assert user is not None  # the token row is deleted together with the user (ON DELETE CASCADE)
+    return user
+
+
+def tokens_sent_recently(session: Session, user: User, purpose: str, within: timedelta) -> int:
+    """How many links of this kind were created for the user recently (used to limit email sending)."""
+    since = datetime.now(UTC) - within
+    rows = session.scalars(
+        select(EmailToken.id).where(EmailToken.user_id == user.id, EmailToken.purpose == purpose, EmailToken.created_at >= since)
+    ).all()
+    return len(rows)
+
+
+def end_all_sessions(session: Session, user: User) -> None:
+    """Sign the user out everywhere (after a password reset). Does not commit."""
+    session.execute(delete(SessionToken).where(SessionToken.user_id == user.id))

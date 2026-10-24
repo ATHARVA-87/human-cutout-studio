@@ -5,6 +5,7 @@ import os
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
@@ -34,9 +35,14 @@ def empty_database():
     admin.dispose()
 
 
-def migrate(engine, action, target: str) -> set[str]:
+def alembic_config() -> Config:
     config = Config(str(PROJECT_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(PROJECT_ROOT / "backend" / "migrations"))
+    return config
+
+
+def migrate(engine, action, target: str) -> set[str]:
+    config = alembic_config()
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         action(config, target)
@@ -47,6 +53,7 @@ def test_upgrade_from_nothing_then_downgrade_and_upgrade_again(empty_database) -
     tables = migrate(empty_database, command.upgrade, "head")
     assert {"users", "session_tokens", "credit_transactions", "predictions", "compositions", "ip_events"} <= tables
     with empty_database.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
+        newest = ScriptDirectory.from_config(alembic_config()).get_current_head()
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == newest
     assert migrate(empty_database, command.downgrade, "base") <= {"alembic_version"}  # every migration undone
     assert "ip_events" in migrate(empty_database, command.upgrade, "head")

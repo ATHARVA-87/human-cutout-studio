@@ -133,6 +133,17 @@ def check_registration_allowed(session: Session, ip: str) -> None:
     enforce_window(events, settings.registrations_per_ip_per_day, window, "Too many new accounts from your network today.")
 
 
+def check_reset_request_allowed(session: Session, ip: str) -> None:
+    """At most 5 "forgot password" requests per IP per hour (each one may send an email)."""
+    window = timedelta(hours=1)
+    events = recent_ip_events(session, ip, "reset_request", datetime.now(UTC) - window)
+    enforce_window(events, 5, window, "Too many password reset requests from your network.")
+
+
+def record_reset_request(session: Session, ip: str) -> None:
+    session.add(IpEvent(ip_hash=ip_hash(ip), kind="reset_request"))
+
+
 def record_registration(session: Session, ip: str) -> None:
     """Added to the caller's transaction (committed together with the new account)."""
     session.add(IpEvent(ip_hash=ip_hash(ip), kind="register"))

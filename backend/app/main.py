@@ -1,4 +1,4 @@
-"""FastAPI application: API routes, generated images (/media) and the built React app (/)."""
+"""FastAPI application: API routes (including owner-only images under /api/media) and the built React app (/)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from backend.app.api import auth, compositions, health, predictions
+from backend.app.api import auth, compositions, health, media, predictions
 from backend.app.core.config import settings
 from backend.app.core.middleware import request_context
 from backend.app.db.session import run_migrations
@@ -47,9 +47,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Human Cutout API", version="1.0.0", lifespan=lifespan)
 app.middleware("http")(request_context)  # request ID, access log, security headers
-for module in (health, auth, predictions, compositions):
+for module in (health, auth, predictions, compositions, media):
     app.include_router(module.router, prefix="/api")
-app.mount("/media", StaticFiles(directory=settings.storage_dir, check_dir=False), name="media")
 
 # In Docker/production the React app is built into frontend/dist and served from the same origin,
 # so the session cookie just works and no CORS setup is needed. In development Vite serves it instead.

@@ -1,5 +1,6 @@
 # Local stack: `docker compose up --build`, then open http://localhost:8000
-# Development (hot reload) uses only the database: `docker compose up db -d`
+# Emails (verification, password reset) land in the local Mailpit inbox: http://localhost:8025
+# Development (hot reload) uses only the database and inbox: `docker compose up db mailpit -d`
 services:
   db:
     image: postgres:16-alpine
@@ -17,6 +18,14 @@ services:
     ports:
       - "127.0.0.1:5432:5432" # reachable from this computer only, not from the network
 
+  # A fake mail server for development: it accepts every email and shows it in a web inbox
+  # instead of delivering it, so you can click verification/reset links without a real email account.
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    ports:
+      - "127.0.0.1:8025:8025" # web inbox
+      - "127.0.0.1:1025:1025" # SMTP (used by `uvicorn --reload` during development)
+
   app:
     build:
       context: .
@@ -25,8 +34,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
       SEGMENTATION_DATABASE_URL: postgresql+psycopg://segmentation:segmentation@db:5432/segmentation
+      SEGMENTATION_PUBLIC_URL: http://localhost:8000
+      SEGMENTATION_EMAIL_BACKEND: smtp
+      SEGMENTATION_SMTP_HOST: mailpit
+      SEGMENTATION_SMTP_PORT: "1025"
+      # Locally every account comes from your own machine, so allow more sign-ups per IP (production: 3/day).
+      SEGMENTATION_REGISTRATIONS_PER_IP_PER_DAY: "100"
     ports:
       - "8000:8000"
     volumes:

@@ -13,7 +13,8 @@ A U-Net trained from scratch to separate people from the background, served as a
 - **Person segmentation** (1 credit): binary mask, transparent cutout with soft edges, and a tinted overlay.
 - **Combine with another image** (2 credits): the person is cropped, colour-matched to the new background, and placed in a canvas editor. Drag to move, scroll or use the slider to resize, mirror, and download a PNG. Half-body photos stay glued to the bottom edge; full-body ones get a soft contact shadow.
 - **History**: a separate page lists your past cutouts and compositions (paginated). Open a result again, or reopen a composition **exactly where you left it**: the editor autosaves the position, size and mirroring. Leaving the Create page and coming back keeps your photos and results.
-- **Accounts and credits**: 30 free credits on sign-up, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
+- **Accounts and credits**: email confirmation before the 30 free credits can be used, "forgot password" by email, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
+- **Private images**: every image is served only to its signed-in owner. Anyone else gets 404, even with the exact link.
 - **Privacy by design**: a full [privacy page](frontend/src/pages/PrivacyPage.tsx) written from the user's side. Uploads and results are **deleted automatically after 5 days**. Self-service account deletion. One strictly necessary cookie, no trackers, self-hosted fonts.
 - **Security**: salted password hashing, hashed session tokens, HTTP-only cookies, sign-in limits per account and per network (blocks password guessing and spraying), a sign-up limit per network, per-user access checks, a strict Content Security Policy and security headers, a non-root container, and a request ID on every response.
 - **Design**: a cutting-mat workspace, the editor's "marching ants" selection and the transparency checkerboard as the visual language. Light and dark theme, a show/hide password toggle, drag-and-drop uploads, and full keyboard support including the editor.
@@ -55,7 +56,7 @@ Training happens offline in PyTorch on a GPU (`src/segmentation`, `scripts/`). T
 | Frontend | React + TypeScript (Vite) | Component UI with type safety; the editor is a plain `<canvas>` |
 | Packaging | Docker (multi-stage) | One image runs the same way locally and in production |
 | CI/CD | GitHub Actions + Render Blueprint | Tests (with a real Postgres) on every push; deploys only when CI passes |
-| Hosting | Render (app) · Neon (Postgres) · Hugging Face Hub (model file) | All free tiers, no credit card |
+| Hosting | Render (app) · Neon (Postgres) · Hugging Face Hub (model file) · Brevo (email) | All free tiers, no credit card |
 
 ## Run it locally
 
@@ -68,13 +69,13 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open http://localhost:8000. If `backend/weights/model.onnx` is missing, the build downloads it from `MODEL_URL`.
+Open http://localhost:8000. Emails (confirmation and password-reset links) go to the local **Mailpit** inbox at http://localhost:8025; no real email account needed. If `backend/weights/model.onnx` is missing, the build downloads it from `MODEL_URL`.
 
 **Option B: development with hot reload**
 
 ```bash
 cp .env.example .env
-docker compose up db -d                       # PostgreSQL only
+docker compose up db mailpit -d               # PostgreSQL + the local email inbox (http://localhost:8025)
 python -m pip install -e '.[dev]'             # once (use a venv or conda env)
 python -m uvicorn backend.app.main:app --reload
 # second terminal
@@ -134,10 +135,13 @@ SEGMENTATION_DATABASE_URL='postgresql+psycopg://…neon.tech/neondb?sslmode=requ
 | --- | --- | --- |
 | POST | `/api/auth/register` · `/api/auth/login` | JSON `{email, password}`; sets an HTTP-only session cookie |
 | POST | `/api/auth/logout` | 204 |
-| GET | `/api/auth/me` | current email, credits and retention period |
+| GET | `/api/auth/me` | current email, credits, whether the email is confirmed, retention period |
+| POST | `/api/auth/verify-email` · `/api/auth/resend-verification` | confirm the email with the token from the link / send a new link |
+| POST | `/api/auth/forgot-password` · `/api/auth/reset-password` | email a reset link (same answer for unknown emails) / set a new password with its token |
 | POST | `/api/auth/recharge` | +30 credits, only when below 2 |
 | DELETE | `/api/auth/account` | JSON `{password}`; deletes the account and all its data |
-| POST | `/api/predictions` | multipart `image` (JPG/PNG ≤ 10 MB); 1 credit |
+| POST | `/api/predictions` | multipart `image` (JPG/PNG ≤ 10 MB); 1 credit; email must be confirmed |
+| GET | `/api/media/{predictions\|compositions}/{id}/{file}` | the image files, owner-only (401 signed out, 404 for others) |
 | GET | `/api/predictions?limit=&offset=` · `/api/predictions/{id}` | your history only, newest first |
 | DELETE | `/api/predictions/{id}` | removes the row and its files |
 | POST | `/api/compositions` | multipart `person_image` + `background_image`; 2 credits |
@@ -145,7 +149,7 @@ SEGMENTATION_DATABASE_URL='postgresql+psycopg://…neon.tech/neondb?sslmode=requ
 | PUT | `/api/compositions/{id}/placement` | JSON `{x, bottom, height, mirrored}` (fractions of the background); the editor autosaves here so "Edit again" continues where you left off |
 | GET | `/api/health` | model and database status (503 when degraded) |
 
-Errors: 401 (not signed in), 402 (not enough credits), 403 (wrong password on account deletion), 404 (not found or not yours), 415 (not JPG/PNG), 429 (rate limited or too many failed sign-ins, with `Retry-After`). Interactive docs: `/docs`.
+Errors: 401 (not signed in), 402 (not enough credits), 403 (email not confirmed, or wrong password on account deletion), 404 (not found or not yours), 415 (not JPG/PNG), 429 (rate limited or too many failed sign-ins, with `Retry-After`). Interactive docs: `/docs`.
 
 ## Project structure
 
@@ -164,7 +168,7 @@ Dockerfile · docker-compose.yml · render.yaml · .github/workflows/ci.yml · a
 
 ## Deployment
 
-`render.yaml` describes the production service: the Docker image runs on Render's free plan, the database is a free Neon PostgreSQL, and `model.onnx` is downloaded from the Hugging Face Hub during the build. Pushing to `main` runs CI, and Render deploys only when CI passes. Step-by-step instructions are in [WALKTHROUGH.md](WALKTHROUGH.md#13-deploying-for-free-step-by-step).
+`render.yaml` describes the production service: the Docker image runs on Render's free plan, the database is a free Neon PostgreSQL, `model.onnx` is downloaded from the Hugging Face Hub during the build, and emails are sent through Brevo's free HTTPS API (Render's free plan blocks SMTP ports). Pushing to `main` runs CI, and Render deploys only when CI passes. Step-by-step instructions are in [WALKTHROUGH.md](WALKTHROUGH.md#13-deploying-for-free-step-by-step).
 
 ## Limitations
 

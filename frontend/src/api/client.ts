@@ -45,6 +45,10 @@ export const api = {
   register: (email: string, password: string) => postJson<Account>("/api/auth/register", { email, password }),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
   recharge: () => request<Account>("/api/auth/recharge", { method: "POST" }),
+  verifyEmail: (token: string) => postJson<void>("/api/auth/verify-email", { token }),
+  resendVerification: () => request<void>("/api/auth/resend-verification", { method: "POST" }),
+  forgotPassword: (email: string) => postJson<{ detail: string }>("/api/auth/forgot-password", { email }),
+  resetPassword: (token: string, password: string) => postJson<void>("/api/auth/reset-password", { token, password }),
   segment: (image: File) => {
     const body = new FormData();
     body.append("image", image);

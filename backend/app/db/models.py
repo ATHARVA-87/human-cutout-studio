@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import expression
 
 from .session import Base
 
@@ -18,7 +19,27 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     credits: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    # Set once the user clicks the link in the verification email. Until then they can sign in but not run jobs.
+    # server_default=false fills the column for users who existed before it was added (see migration 0003).
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=expression.false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EmailToken(Base):
+    """A one-time link sent by email: verify the address, or reset the password.
+
+    Only a SHA-256 hash of the token is stored (like session tokens), so a leaked database can't be used
+    to verify or reset anything. Each token expires and can be used once (`used_at`).
+    """
+
+    __tablename__ = "email_tokens"
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(10), nullable=False)  # "verify" or "reset"
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SessionToken(Base):

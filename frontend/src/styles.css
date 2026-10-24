@@ -812,6 +812,34 @@ main.shell {
   flex-wrap: wrap;
 }
 
+/* ---------- Account email pages and the confirm-email banner ---------- */
+.narrow-page {
+  max-width: 460px;
+  padding: 56px 0 24px;
+  display: grid;
+  gap: 18px;
+}
+.forgot-link {
+  justify-self: end;
+  color: var(--text-soft);
+}
+.confirm-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px 24px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+  padding: 16px 18px;
+  border-radius: 8px;
+  background: var(--notice-bg);
+  color: var(--notice-text);
+  border-left: 3px solid var(--blade);
+}
+.confirm-banner p {
+  margin-top: 4px;
+}
+
 /* ---------- Privacy notice ---------- */
 .legal {
   max-width: 68ch;

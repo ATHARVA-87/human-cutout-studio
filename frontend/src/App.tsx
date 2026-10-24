@@ -5,8 +5,11 @@ import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
 import { RechargeModal } from "./components/RechargeModal";
 import { CreatePage } from "./pages/CreatePage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { PrivacyPage } from "./pages/PrivacyPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 import { useRoute } from "./router";
 import { type Account, COMPOSE_COST } from "./types";
 
@@ -100,12 +103,33 @@ export default function App() {
   // Which page is visible. The Create page stays MOUNTED (just hidden) while you look at History or
   // Privacy, so chosen photos, results and the editor keep their state when you come back.
   // It is unmounted (and its state cleared) only when you sign out.
-  const showAuth = !checkingSession && !user && route !== "privacy";
+  const publicPage = route === "privacy" || route === "forgot" || route === "reset" || route === "verify"; // work signed out too
+  const showAuth = !checkingSession && !user && !publicPage;
   const pages = (
     <>
       {route === "privacy" && (
         <div className="page">
           <PrivacyPage />
+        </div>
+      )}
+      {route === "forgot" && (
+        <div className="page">
+          <ForgotPasswordPage />
+        </div>
+      )}
+      {route === "reset" && (
+        <div className="page">
+          <ResetPasswordPage
+            onReset={() => {
+              signOut("Your password was changed and you were signed out everywhere. Sign in with your new password.");
+              window.location.hash = "#/";
+            }}
+          />
+        </div>
+      )}
+      {route === "verify" && (
+        <div className="page">
+          <VerifyEmailPage signedIn={Boolean(user)} onVerified={() => setUser((current) => current && { ...current, email_verified: true })} />
         </div>
       )}
       {showAuth && (
@@ -123,6 +147,7 @@ export default function App() {
         <div className="page" hidden={route !== "create"}>
           <CreatePage
             user={user}
+            onUserUpdate={setUser}
             busy={busy}
             setBusy={setBusy}
             onCredits={(credits) => setUser((current) => current && { ...current, credits })}

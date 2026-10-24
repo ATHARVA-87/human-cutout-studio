@@ -3,6 +3,7 @@
 export interface Account {
   email: string;
   credits: number;
+  email_verified: boolean; // jobs are allowed only after the link in the verification email is opened
   retention_days: number; // uploads and results are deleted after this many days
 }
 

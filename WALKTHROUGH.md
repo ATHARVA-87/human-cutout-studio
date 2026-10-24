@@ -376,6 +376,34 @@ These were added after a self-review against industry standards (the gaps I'd ex
   - IPs are stored only as a **salted hash** (HMAC). There are only about 4 billion IPv4 addresses, so a plain hash could be reversed by hashing them all; the secret salt prevents that. Records are deleted after 1 day.
   - **Getting the real IP:** behind Render's proxy, every request seems to come from the proxy. `uvicorn --proxy-headers` with `FORWARDED_ALLOW_IPS="*"` (set only on Render, where all traffic goes through its proxy) reads the real client IP from `X-Forwarded-For`. Locally only 127.0.0.1 is trusted, so nobody can fake their IP with that header.
 
+### 7.12c Email confirmation, password reset and private images
+These closed the two biggest product gaps: no way to recover a forgotten password, and images that anyone with the exact link could open.
+
+- **One-time email links** ([services/auth.py](backend/app/services/auth.py), table `email_tokens`, migration `0003`):
+  - Random 32-byte token; only its **SHA-256 hash** is stored (same idea as session tokens).
+  - Each token has a purpose (`verify` or `reset`), an **expiry** (24 h / 30 min), and is **single-use** (`used_at`).
+  - Consuming a token uses `SELECT … FOR UPDATE`, so two simultaneous clicks can't both use it.
+  - Asking for a new link **expires** the older ones (they're kept briefly so the "max 3 emails per hour" limit can count them).
+- **Email confirmation:**
+  - New accounts can sign in, but `verified_user` blocks paid jobs with 403 until the link is opened.
+  - This also stops credit farming with made-up addresses (on top of the per-IP sign-up limit).
+  - Migration `0003` *adds a column to an existing table* (`users.email_verified … server_default false`), exactly what `create_all` couldn't do.
+- **Password reset:**
+  - `forgot-password` always returns the **same** answer, whether or not the email has an account (no account discovery). It's limited to 5 per IP per hour and 3 emails per account per hour.
+  - `reset-password` sets the new hash, marks the email confirmed (they proved they own the inbox), and **deletes every session** (signed out everywhere).
+- **Link safety:**
+  - Links are built from the configured `public_url`. On Render that's `RENDER_EXTERNAL_URL`, never the request's `Host` header. Otherwise an attacker could request a reset for your email with `Host: evil.com`, and the email would carry a working token to *their* site ("host header poisoning"). There's a test for this.
+  - The token sits in the URL **fragment** (`/#/reset?token=…`), which browsers never send to servers, so it isn't written to server or proxy logs.
+- **Sending email** ([services/email.py](backend/app/services/email.py)):
+  - One `send_email()` function with three backends: `console` (tests and fallback), `smtp` (local **Mailpit** inbox at http://localhost:8025), and `brevo` (production, HTTPS API).
+  - *Why not SMTP in production?* Render's free plan blocks ports 25/465/587.
+  - Emails are sent with FastAPI `BackgroundTasks`, after the response, so sign-up never waits for the mail server, and a failure is logged instead of breaking the request.
+- **Private images** ([api/media.py](backend/app/api/media.py)):
+  - The public `/media` folder is gone. Images come from `/api/media/{predictions|compositions}/{id}/{file}`, which needs the session cookie *and* ownership (`get_owned` → 404 for others).
+  - The URL contains an item id and a fixed file name, never a path, so `../` tricks are impossible.
+  - `Cache-Control: private`: browsers may cache it, but shared caches (proxies, CDNs) must not.
+  - *At scale on AWS:* the same ownership check, then a redirect to a short-lived S3 presigned URL, so the app server doesn't stream the bytes itself.
+
 ### 7.13 Privacy by design ([pages/PrivacyPage.tsx](frontend/src/pages/PrivacyPage.tsx))
 The privacy page ("Your privacy") is written **from the user's side**: "your photos are deleted after 5 days", "you can delete…", with no "we collect…". It reflects how the code actually behaves (an interviewer may check this):
 - **Data minimisation:** store a password *hash*, a token *hash* and an email *hash* for failed logins; log no personal data.
@@ -597,30 +625,35 @@ The free server has **512 MB RAM and 0.1 CPU**. I measured inside the production
 | What I manage | Nothing but my code | OS updates, firewall, HTTPS, Docker | Everything (IAM, networking, …) |
 | Interview story | Same Docker image, CI/CD, infrastructure as code | Linux admin | Explained below as "how I'd do it on AWS" |
 
-### Steps (about 30 minutes)
-1. **Model file → Hugging Face Hub**
-   1. Make an account at huggingface.co, then **New → Model**, name it `human-cutout-unet`, public.
-   2. **Files → Add file → Upload files:** upload `backend/weights/model.onnx`. Create it first with `python scripts/export_onnx.py` if missing.
-   3. Optionally add a README model card (architecture, data, Dice scores, limitations from this guide).
-   4. The download link is `https://huggingface.co/SUPER-87/human-cutout-unet/resolve/main/model.onnx` (my Hugging Face username is `SUPER-87`); it is set in `render.yaml` and `.env.example`. Check it with `curl -IL <link>`; the SHA-256 of the download should equal `sha256sum backend/weights/model.onnx`.
-2. **Database → Neon**
-   1. Sign in at neon.tech with GitHub. Create a project `human-cutout` in region **AWS Asia Pacific (Singapore)**, the same region as Render, so queries are fast.
-   2. **Connect** → copy the connection string **with connection pooling turned off** (the direct host, without `-pooler`). Our app already pools, and a direct connection avoids PgBouncer prepared-statement issues.
-   3. Change the start from `postgresql://` to `postgresql+psycopg://` and keep `?sslmode=require`.
-   4. Test from your laptop: `SEGMENTATION_DATABASE_URL='<url>' python scripts/db_admin.py stats` (the tables appear after the first deploy).
-3. **Code → GitHub**
-   1. Push the branch and open a PR. Wait for the CI ✓, then merge to `main`.
-4. **App → Render**
-   1. Sign in at render.com with GitHub, then **New → Blueprint** → pick the `human-cutout-studio` repo. Render reads `render.yaml`.
-   2. It asks for `SEGMENTATION_DATABASE_URL`: paste the Neon URL, then **Apply**.
-   3. The first build takes a few minutes. Watch the logs.
-   4. Open `https://<service>.onrender.com/api/health` and expect `{"status":"ok","model":"ready","database":"ready"}`.
-5. **Smoke test on the live site**
-   - register, segment, compose, log out;
+### Steps (about 40 minutes)
+1. **Model file → Hugging Face Hub** (done): `https://huggingface.co/SUPER-87/human-cutout-unet/resolve/main/model.onnx`, already set in `render.yaml`. Its SHA-256 matches `backend/weights/model.onnx`.
+2. **Database → Neon** (done: project in Singapore, connection tested):
+   1. If the password was ever shared, reset it: branch menu in the sidebar → **Roles** → `neondb_owner` → ⋯ → **Reset password**.
+   2. Use the **direct** connection string (no `-pooler`), starting with `postgresql+psycopg://`, keeping `?sslmode=require&channel_binding=require`.
+   3. Check it: `SEGMENTATION_DATABASE_URL='<url>' python scripts/db_admin.py stats`.
+3. **Email → Brevo** (free, 300 emails/day):
+   1. Sign up at brevo.com.
+   2. Under **Senders, Domains & Dedicated IPs → Senders**, add the address emails should come from (e.g. your Gmail) and confirm it with the code Brevo sends.
+   3. Under **SMTP & API → API keys**, create a key.
+   4. Without your own domain, emails may land in spam. Test with your own inbox, and add a custom domain later if needed.
+4. **Code → GitHub:** push the branch, open a PR into `main`, wait for CI ✓ (lint, types, tests, build), then merge.
+5. **App → Render:**
+   1. Sign in at render.com with GitHub, then **New → Blueprint** → `human-cutout-studio` (branch `main`).
+   2. Render reads `render.yaml` and asks for three secrets:
+      - `SEGMENTATION_DATABASE_URL` (Neon);
+      - `SEGMENTATION_BREVO_API_KEY`;
+      - `SEGMENTATION_EMAIL_FROM` (the verified Brevo sender).
+
+      The IP-hash secret is generated automatically, and links use `RENDER_EXTERNAL_URL` automatically.
+   3. **Apply.** In the log, expect `Running upgrade -> 0001 … -> 0003` (tables created in Neon), then a green health check.
+6. **Smoke test on the live site:**
+   - sign up and **get the confirmation email**, open the link, then make a cutout;
+   - check that the image URL opened in a private window gives 401;
+   - log out, use **Forgot your password?**, open the email, set a new password, sign in;
+   - place a person, reopen from History;
    - log in from two browsers (the first gets signed out);
-   - run 11 jobs (the 11th is rate-limited);
    - `db_admin.py stats` against Neon.
-6. **Finish:** put the live link and a GIF in the README.
+7. **Finish:** put the live link in the README and push. Render redeploys after CI passes.
 
 ### Staying inside the free limits
 - **Render:** 750 instance-hours per month (one service running all month fits). It sleeps after 15 min without traffic. Don't use pinger services to keep it awake; just tell visitors about the cold start.
@@ -678,6 +711,9 @@ Numbers follow my original issue list (it had no item 8).
 | – | No automatic code-quality gate | — | `ruff` + `mypy` in CI (mypy found 20 real gaps) |
 | – | Container ran as root | Default Docker user | Non-root `app` user |
 | – | One person could farm accounts or spray passwords | Limits were per email only | Per-IP sign-up and failed-login limits (salted IP hashes, 1 day) |
+| – | A forgotten password meant losing the account | No reset flow | Email reset link: hashed, 30-min, single-use token; same answer for unknown emails; signs out everywhere |
+| – | Anyone could sign up with a made-up email | No confirmation | Confirmation link; jobs locked until confirmed |
+| – | Anyone with an image's exact link could open it | Images were public static files | Owner-only `/api/media/...` endpoint (401/404 for others) |
 | – | Underline jumped between Create and History | Each link drew its own border | One sliding underline + short page fade |
 | – | Photos and editor lost after visiting History | The Create page unmounted, so React discarded its state | Create page stays mounted (hidden) until sign-out |
 | – | "Edit again" always started from the default position | Placement was never saved | `composition_placements` table + debounced autosave `PUT`, restored on open |
@@ -700,6 +736,8 @@ Numbers follow my original issue list (it had no item 8).
 | `git rm -r` of a folder was blocked by my tool's safety check | Removed the two tracked files individually; git history keeps them anyway |
 | After switching the container to a non-root user, uploads failed locally | The old Docker volume was owned by root; `docker compose run --rm --user root --entrypoint "" app chown -R app:app /app/uploads` fixed it (new volumes and Render are fine) |
 | PyPI timed out while generating lock files | Retried with `--pip-args "--timeout 90 --retries 5"` |
+| Render's free plan blocks SMTP ports | Production email goes over Brevo's HTTPS API; SMTP only for the local Mailpit inbox |
+| My local tests hit my own "3 sign-ups per IP" limit | Raised it only in `docker-compose.yml` for local testing; production keeps 3 |
 
 ---
 
@@ -734,7 +772,6 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 - **`/media` URLs** are unguessable but not access-checked; S3 presigned URLs fix this too.
 - **Sign-up abuse:** anyone can create many accounts for free credits. Add email verification, CAPTCHA, or a per-IP sign-up limit.
 - **Offset pagination** gets slow for very deep pages; switch to keyset pagination at scale.
-- **No email verification or password reset:** needs an email-sending service; next step for real users.
 - **Single-instance inference:** at scale, move inference to a job queue (SQS/Celery) with worker containers.
 - **Realism:** no perspective or light-direction matching.
 
@@ -792,11 +829,15 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 39. *Offset vs keyset pagination?* Offset is simple and supports "page N" but scans skipped rows. Keyset (`WHERE created_at < last_seen`) stays fast at any depth but only supports next/previous.
 40. *What's in your privacy notice and why no cookie banner?* What I collect, why, retention, processors, rights, cookies. Only one strictly necessary cookie and no trackers, which are exempt from consent.
 41. *How does the editor remember where you left the person?* A debounced autosave `PUT` (0.5 s after the last change, plus a flush on close) upserts one row per composition, as fractions of the background. The history list includes it through a LEFT JOIN, so there are no N+1 queries.
+42. *Why did the Create page lose its state, and how did you fix it?* React state lives as long as the component is mounted. Navigating away unmounted it. Now it stays mounted but hidden, and is cleared on sign-out for privacy.
 43. *How do you change the database schema in production?* With Alembic migrations: versioned upgrade/downgrade scripts. The app applies them at startup in one transaction behind an advisory lock, and a test runs them up, down and up again on an empty database.
 44. *What's a lock file for?* Reproducible builds. `pyproject.toml` lists acceptable ranges; the lock pins exact versions of everything, including indirect dependencies, so CI, Docker and production install identical packages.
 45. *How do you stop password spraying?* A per-IP failed-login limit (20 per 15 min) in addition to the per-email one, with IPs stored as salted hashes. Behind a proxy you must read the real IP from `X-Forwarded-For`, but only trust that header from your own proxy.
 46. *Why run the container as non-root?* Least privilege: a compromised process can't modify the system or the app's code.
-42. *Why did the Create page lose its state, and how did you fix it?* React state lives as long as the component is mounted. Navigating away unmounted it. Now it stays mounted but hidden, and is cleared on sign-out for privacy.
+47. *How does your password reset stay secure?* Random token stored only as a hash, 30-minute expiry, single use (row lock), same response for unknown emails, rate limits, all sessions ended after the reset. The link is built from a configured URL (not the Host header) and the token sits in the URL fragment, so it isn't logged.
+48. *Why confirm emails at all?* It proves the person owns the address (needed before sending reset links to it) and stops credit farming with fake addresses.
+49. *How are images kept private?* They're served by an endpoint that requires the session and checks ownership, returning 404 for others. On AWS it would be the same check plus a short-lived S3 presigned URL.
+50. *Why can't you use SMTP on Render, and what did you do?* The free plan blocks SMTP ports, so production uses Brevo's HTTPS API. The code has interchangeable backends (console, SMTP for the local Mailpit inbox, Brevo).
 
 ---
 

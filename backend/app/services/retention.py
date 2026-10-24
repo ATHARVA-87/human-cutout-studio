@@ -3,7 +3,7 @@
 Policy (also stated on the Privacy page):
 - uploads, results and their history rows: deleted `retention_days` (5) days after creation
 - expired login sessions: deleted
-- failed-login and per-IP records: deleted after 1 day
+- failed-login and per-IP records, and expired email links: deleted after 1 day
 - credit ledger rows: deleted after 30 days
 Accounts themselves stay until the user deletes them.
 
@@ -24,7 +24,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import delete, text
 
 from backend.app.core.config import settings
-from backend.app.db.models import Composition, CreditTransaction, IpEvent, LoginAttempt, Prediction, SessionToken
+from backend.app.db.models import Composition, CreditTransaction, EmailToken, IpEvent, LoginAttempt, Prediction, SessionToken
 from backend.app.db.session import SessionLocal, rows_affected
 
 logger = logging.getLogger("human_cutout.retention")
@@ -47,6 +47,7 @@ class CleanupReport:
     sessions: int
     login_attempts: int
     ip_events: int
+    email_tokens: int
     ledger_rows: int
     folders: int
 
@@ -67,6 +68,7 @@ def run_cleanup(now: datetime | None = None) -> CleanupReport | None:
             "sessions": rows_affected(session.execute(delete(SessionToken).where(SessionToken.expires_at < now))),
             "login_attempts": rows_affected(session.execute(delete(LoginAttempt).where(LoginAttempt.created_at < login_cutoff))),
             "ip_events": rows_affected(session.execute(delete(IpEvent).where(IpEvent.created_at < login_cutoff))),
+            "email_tokens": rows_affected(session.execute(delete(EmailToken).where(EmailToken.expires_at < login_cutoff))),
             "ledger_rows": rows_affected(
                 session.execute(delete(CreditTransaction).where(CreditTransaction.created_at < now - timedelta(days=LEDGER_DAYS)))
             ),

@@ -1,6 +1,9 @@
-"""Account routes: register, login, logout, current user, demo recharge, delete account."""
+"""Account routes: register, login, logout, current user, demo recharge, delete account,
+email verification and password reset."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from datetime import timedelta
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -9,30 +12,52 @@ from backend.app.api.deps import client_ip
 from backend.app.core.config import settings
 from backend.app.db.models import Composition, CreditTransaction, Prediction, User
 from backend.app.db.session import get_session
-from backend.app.schemas import Account, Credentials, PasswordConfirmation
-from backend.app.services.auth import check_login, current_user, end_session, hash_password, start_session
+from backend.app.schemas import Account, Credentials, EmailOnly, NewPassword, PasswordConfirmation, TokenBody
+from backend.app.services.auth import (
+    check_login,
+    create_email_token,
+    current_user,
+    end_all_sessions,
+    end_session,
+    hash_password,
+    start_session,
+    tokens_sent_recently,
+    use_email_token,
+)
 from backend.app.services.credits import recharge as recharge_credits
+from backend.app.services.email import reset_email, send_email, verification_email
 from backend.app.services.jobs import COMPOSE_COST, RECHARGE_AMOUNT
 from backend.app.services.rate_limit import (
     check_login_allowed,
     check_registration_allowed,
+    check_reset_request_allowed,
     clear_login_failures,
     new_bucket,
     record_login_failure,
     record_registration,
+    record_reset_request,
 )
 from backend.app.services.storage import delete_job_folder
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 WELCOME_CREDITS = 30
+MAX_EMAILS_PER_HOUR = 3  # per user and kind of link, so nobody can flood an inbox
 
 
 def to_account(user: User) -> Account:
-    return Account(email=user.email, credits=user.credits, retention_days=settings.retention_days)
+    return Account(email=user.email, credits=user.credits, email_verified=user.email_verified, retention_days=settings.retention_days)
+
+
+def email_link(path: str, token: str) -> str:
+    # The token goes in the URL fragment (after #): browsers never send fragments to servers,
+    # so tokens don't end up in server or proxy logs. Built from the configured public_url, never the Host header.
+    return f"{settings.public_url.rstrip('/')}/#/{path}?token={token}"
 
 
 @router.post("/register", response_model=Account, status_code=status.HTTP_201_CREATED)
-def register(body: Credentials, request: Request, response: Response, session: Session = Depends(get_session)) -> Account:
+def register(
+    body: Credentials, request: Request, response: Response, background: BackgroundTasks, session: Session = Depends(get_session)
+) -> Account:
     check_registration_allowed(session, client_ip(request))  # max sign-ups per IP per day
     email = body.email.lower()
     if session.scalar(select(User).where(User.email == email)):
@@ -47,8 +72,11 @@ def register(body: Credentials, request: Request, response: Response, session: S
     session.add(CreditTransaction(user_id=user.id, amount=WELCOME_CREDITS, reason="welcome_credits"))
     session.add(new_bucket(user))
     record_registration(session, client_ip(request))
+    token = create_email_token(session, user, "verify", timedelta(hours=settings.verify_token_hours))
     session.commit()
     start_session(session, response, user)
+    # Sent after the response, so sign-up doesn't wait for the email server.
+    background.add_task(send_email, verification_email(user.email, email_link("verify", token)))
     return to_account(user)
 
 
@@ -109,3 +137,52 @@ def delete_account(
     for path in folders:
         delete_job_folder(path)
     end_session(session, request, response)  # clears the cookie (the session row is already gone)
+
+
+@router.post("/verify-email", status_code=status.HTTP_204_NO_CONTENT)
+def verify_email(body: TokenBody, session: Session = Depends(get_session)) -> None:
+    """The link in the verification email. Works without being signed in: having the link proves the inbox."""
+    user = use_email_token(session, body.token, "verify")
+    user.email_verified = True
+    session.commit()
+
+
+@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+def resend_verification(background: BackgroundTasks, session: Session = Depends(get_session), user: User = Depends(current_user)) -> None:
+    if user.email_verified:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Your email address is already confirmed.")
+    if tokens_sent_recently(session, user, "verify", timedelta(hours=1)) >= MAX_EMAILS_PER_HOUR:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "We've sent several emails already. Check your inbox and spam folder, or try again in an hour.",
+        )
+    token = create_email_token(session, user, "verify", timedelta(hours=settings.verify_token_hours))
+    session.commit()
+    background.add_task(send_email, verification_email(user.email, email_link("verify", token)))
+
+
+@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+def forgot_password(
+    body: EmailOnly, request: Request, background: BackgroundTasks, session: Session = Depends(get_session)
+) -> dict[str, str]:
+    """Always answers the same way, whether or not the email has an account (no account discovery)."""
+    ip = client_ip(request)
+    check_reset_request_allowed(session, ip)
+    record_reset_request(session, ip)
+    user = session.scalar(select(User).where(User.email == body.email.lower()))
+    if user is not None and tokens_sent_recently(session, user, "reset", timedelta(hours=1)) < MAX_EMAILS_PER_HOUR:
+        token = create_email_token(session, user, "reset", timedelta(minutes=settings.reset_token_minutes))
+        background.add_task(send_email, reset_email(user.email, email_link("reset", token)))
+    session.commit()
+    return {"detail": "If an account exists for that email, a link to reset the password is on its way."}
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(body: NewPassword, session: Session = Depends(get_session)) -> None:
+    """Set a new password from a reset link, and sign the account out on every device."""
+    user = use_email_token(session, body.token, "reset")
+    user.password_hash = hash_password(body.password)
+    user.email_verified = True  # opening the emailed link proves they own the inbox
+    end_all_sessions(session, user)
+    session.commit()
+    clear_login_failures(session, user.email)

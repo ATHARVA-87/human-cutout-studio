@@ -12,7 +12,7 @@ from backend.app.api.deps import get_owned, model_or_503
 from backend.app.db.models import Prediction, User
 from backend.app.db.session import get_session
 from backend.app.schemas import PredictionListResponse, PredictionResponse
-from backend.app.services.auth import current_user
+from backend.app.services.auth import current_user, verified_user
 from backend.app.services.jobs import SEGMENT_COST, run_paid_job
 from backend.app.services.retention import expiry_of
 from backend.app.services.storage import LocalStorage, delete_job_folder, media_url, read_image
@@ -30,10 +30,10 @@ def to_response(prediction: Prediction, credits: int | None = None) -> Predictio
         source_height=prediction.source_height,
         foreground_fraction=prediction.foreground_fraction,
         model_version=prediction.model_version,
-        original_url=media_url(prediction.original_path),
-        mask_url=media_url(prediction.mask_path),
-        overlay_url=media_url(prediction.overlay_path),
-        cutout_url=media_url(prediction.cutout_path),
+        original_url=media_url("predictions", prediction.id, "original"),
+        mask_url=media_url("predictions", prediction.id, "mask"),
+        overlay_url=media_url("predictions", prediction.id, "overlay"),
+        cutout_url=media_url("predictions", prediction.id, "cutout"),
         credits=credits,
     )
 
@@ -43,7 +43,7 @@ async def create_prediction(
     request: Request,
     image: UploadFile = File(...),
     session: Session = Depends(get_session),
-    user: User = Depends(current_user),
+    user: User = Depends(verified_user),  # signed in AND email confirmed
 ) -> PredictionResponse:
     # Validate everything that is free to check BEFORE spending a token or credits.
     source = await read_image(image)

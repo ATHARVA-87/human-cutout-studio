@@ -9,6 +9,7 @@ type Mode = "segment" | "compose";
 
 interface CreatePageProps {
   user: Account;
+  onUserUpdate: (account: Account) => void;
   busy: boolean;
   setBusy: (busy: boolean) => void;
   onCredits: (credits: number) => void;
@@ -17,7 +18,51 @@ interface CreatePageProps {
 }
 
 /** The main page: choose an operation, upload images, see the result. */
-export function CreatePage({ user, busy, setBusy, onCredits, onNeedCredits, onApiError }: CreatePageProps) {
+/** Shown until the email is confirmed: jobs are locked, with buttons to resend the link or re-check. */
+function ConfirmEmailBanner({ user, onUserUpdate, onApiError }: Pick<CreatePageProps, "user" | "onUserUpdate" | "onApiError">) {
+  const [message, setMessage] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const resend = async () => {
+    setBusy(true);
+    try {
+      await api.resendVerification();
+      setMessage(`A new link is on its way to ${user.email}. Older links no longer work.`);
+    } catch (caught) {
+      setMessage(onApiError(caught, 0));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const check = async () => {
+    const account = await api.me().catch(() => undefined);
+    if (account) onUserUpdate(account);
+    if (account && !account.email_verified) setMessage("Not confirmed yet. Open the link in the email first, then try again.");
+  };
+
+  return (
+    <div className="confirm-banner" role="status">
+      <div>
+        <strong>Confirm your email to start</strong>
+        <p>
+          A confirmation link was sent to {user.email}. Open it to unlock your {user.credits} credits. Check your spam folder if it isn't there.
+        </p>
+        {message && <p className="small">{message}</p>}
+      </div>
+      <div className="confirm-actions">
+        <button className="button secondary" onClick={() => void resend()} disabled={busy}>
+          Send a new link
+        </button>
+        <button className="button quiet" onClick={() => void check()}>
+          I've confirmed it
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function CreatePage({ user, onUserUpdate, busy, setBusy, onCredits, onNeedCredits, onApiError }: CreatePageProps) {
   const [mode, setMode] = useState<Mode>("segment");
   const [person, setPerson] = useState<File>();
   const [background, setBackground] = useState<File>();
@@ -51,7 +96,7 @@ export function CreatePage({ user, busy, setBusy, onCredits, onNeedCredits, onAp
     }
   };
 
-  const ready = Boolean(person && (mode === "segment" || background));
+  const ready = Boolean(person && (mode === "segment" || background)) && user.email_verified;
   const action = mode === "segment" ? "Cut out the person" : "Cut out and place";
 
   return (
@@ -60,6 +105,7 @@ export function CreatePage({ user, busy, setBusy, onCredits, onNeedCredits, onAp
         <h1 className="page-title">Make a cutout</h1>
         <p>Pick what you want, add your photo, and the model finds the person. Results show up on the mat.</p>
       </section>
+      {!user.email_verified && <ConfirmEmailBanner user={user} onUserUpdate={onUserUpdate} onApiError={onApiError} />}
 
       <div className="workbench">
         <ol className="steps">
@@ -94,7 +140,11 @@ export function CreatePage({ user, busy, setBusy, onCredits, onNeedCredits, onAp
               <button className="button primary wide" disabled={busy || !ready} onClick={run}>
                 {busy ? "Cutting…" : `${action} (${cost} ${cost === 1 ? "credit" : "credits"})`}
               </button>
-              {!ready && !busy && <p className="small soft">{mode === "segment" ? "Add a photo first." : "Add both photos first."}</p>}
+              {!ready && !busy && (
+                <p className="small soft">
+                  {!user.email_verified ? "Confirm your email first." : mode === "segment" ? "Add a photo first." : "Add both photos first."}
+                </p>
+              )}
               {error && (
                 <p className="notice" role="alert">
                   {error}

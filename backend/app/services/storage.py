@@ -1,6 +1,6 @@
 """Upload validation and local file storage for generated images.
 
-Files go to `settings.storage_dir` (default `uploads/`) and are served under `/media/...`.
+Files go to `settings.storage_dir` (default `uploads/`) and are served only to their owner by api/media.py.
 On the free hosting tier this disk is temporary; in a bigger deployment this class would be
 swapped for object storage such as Amazon S3 without changing the routes.
 """
@@ -12,6 +12,7 @@ import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
@@ -75,10 +76,9 @@ async def read_image(upload: UploadFile) -> Image.Image:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "The file is not a valid JPG or PNG image.") from error
 
 
-def media_url(path: str) -> str:
-    """Turn a stored file path into the public URL the browser loads, e.g. /media/<uuid>/mask.png."""
-    relative = Path(path).resolve().relative_to(settings.storage_dir.resolve())
-    return "/media/" + relative.as_posix()
+def media_url(collection: str, item_id: UUID, file: str) -> str:
+    """The URL the browser loads for one image, e.g. /api/media/predictions/<id>/cutout (owner-only, see api/media.py)."""
+    return f"/api/media/{collection}/{item_id}/{file}"
 
 
 class LocalStorage:

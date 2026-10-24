@@ -18,7 +18,21 @@ class PasswordConfirmation(BaseModel):
 class Account(BaseModel):
     email: str
     credits: int
+    email_verified: bool  # jobs are allowed only after the email link was clicked
     retention_days: int  # how long uploads and results are kept (shown in the UI)
+
+
+class EmailOnly(BaseModel):
+    email: EmailStr
+
+
+class TokenBody(BaseModel):
+    token: str = Field(min_length=20, max_length=200)  # the random token from an email link
+
+
+class NewPassword(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    password: str = Field(min_length=8, max_length=128)
 
 
 class PredictionResponse(BaseModel):

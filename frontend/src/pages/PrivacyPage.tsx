@@ -31,7 +31,8 @@ export function PrivacyPage() {
       <ul>
         <li>
           <strong>Your account:</strong> your email address and your password. Your password itself is never stored, only a salted, slow
-          hash of it (PBKDF2-SHA256), so nobody can read it back.
+          hash of it (PBKDF2-SHA256), so nobody can read it back. Your email address is used only to sign you in and to send you two kinds of
+          emails you ask for: a link to confirm your address, and a link to reset your password. No newsletters or marketing.
         </li>
         <li>
           <strong>Your photos and results:</strong> the photos you upload, the masks, cutouts and combined photos made from them, where you
@@ -53,7 +54,7 @@ export function PrivacyPage() {
 
       <h2>3. How your information is used</h2>
       <ul>
-        <li>To give you what you ask for: signing you in, processing your photos, showing your history and counting your credits.</li>
+        <li>To give you what you ask for: signing you in, confirming your email, resetting your password, processing your photos, showing your history and counting your credits.</li>
         <li>To keep your account and the service safe: blocking password guessing, abuse and overload.</li>
       </ul>
       <p>
@@ -75,7 +76,7 @@ export function PrivacyPage() {
             <td>{RETENTION_DAYS} days, then deleted automatically. You can delete them sooner yourself.</td>
           </tr>
           <tr>
-            <td>Failed sign-in attempts, and the hashed IP records from sign-ups and failed sign-ins</td>
+            <td>Failed sign-in attempts, the hashed IP records from sign-ups and failed sign-ins, and used or expired email links</td>
             <td>1 day</td>
           </tr>
           <tr>
@@ -121,9 +122,13 @@ export function PrivacyPage() {
         <li>
           <strong>Neon</strong> hosts the database with your account, credits and history.
         </li>
+        <li>
+          <strong>Brevo</strong> delivers the confirmation and password-reset emails. It receives your email address and the email's content,
+          nothing else.
+        </li>
       </ul>
       <p>
-        Both run in Singapore. The model file is downloaded from Hugging Face when the site is built; your data is never sent there, and no
+        Render and Neon run in Singapore; Brevo is based in the EU. The model file is downloaded from Hugging Face when the site is built; your data is never sent there, and no
         one else receives it.
       </p>
 
@@ -134,8 +139,8 @@ export function PrivacyPage() {
         stop people from guessing your password or flooding the service.
       </p>
       <p>
-        Your images are served from long, random links that can't be guessed. Anyone who has the exact link to one of your images can open
-        it until it's deleted, so don't share links to images you want to keep private.
+        Your images can only be opened by you, while you're signed in. Even someone who has the exact link to one of your images gets
+        nothing. Links in emails expire (password reset after 30 minutes) and work only once, and they're kept out of server logs.
       </p>
 
       <h2>8. Your choices and rights</h2>

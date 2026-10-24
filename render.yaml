@@ -18,5 +18,12 @@ services:
         generateValue: true # Render creates a random secret once; used to hash client IPs
       - key: FORWARDED_ALLOW_IPS
         value: "*" # all traffic reaches the app through Render's proxy, so trust its X-Forwarded-For
+      - key: SEGMENTATION_EMAIL_BACKEND
+        value: brevo # HTTPS API: Render's free plan blocks SMTP ports
+      - key: SEGMENTATION_BREVO_API_KEY
+        sync: false # secret: paste your Brevo API key when creating the Blueprint
+      - key: SEGMENTATION_EMAIL_FROM
+        sync: false # the sender address you verified in Brevo
+      # Email links use RENDER_EXTERNAL_URL (set by Render automatically) as the site address.
       - key: MODEL_URL
         value: https://huggingface.co/SUPER-87/human-cutout-unet/resolve/main/model.onnx
