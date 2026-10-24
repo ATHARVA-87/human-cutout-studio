@@ -96,5 +96,7 @@ def current_user(request: Request, session: Session = Depends(get_session)) -> U
     )
     user = session.get(User, entry.user_id) if entry else None
     if user is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Your session ended (it expired or you signed in elsewhere). Please sign in again.")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Your session ended (it expired or you signed in elsewhere). Please sign in again."
+        )
     return user

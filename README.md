@@ -15,7 +15,7 @@ A U-Net trained from scratch to separate people from the background, served as a
 - **History**: a separate page lists your past cutouts and compositions (paginated). Open a result again, or reopen a composition **exactly where you left it**: the editor autosaves the position, size and mirroring. Leaving the Create page and coming back keeps your photos and results.
 - **Accounts and credits**: 30 free credits on sign-up, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
 - **Privacy by design**: a full [privacy page](frontend/src/pages/PrivacyPage.tsx) written from the user's side. Uploads and results are **deleted automatically after 5 days**. Self-service account deletion. One strictly necessary cookie, no trackers, self-hosted fonts.
-- **Security**: salted password hashing, hashed session tokens, HTTP-only cookies, a limit of 5 failed sign-ins per 15 minutes, per-user access checks, a strict Content Security Policy and security headers, and a request ID on every response.
+- **Security**: salted password hashing, hashed session tokens, HTTP-only cookies, sign-in limits per account and per network (blocks password guessing and spraying), a sign-up limit per network, per-user access checks, a strict Content Security Policy and security headers, a non-root container, and a request ID on every response.
 - **Design**: a cutting-mat workspace, the editor's "marching ants" selection and the transparency checkerboard as the visual language. Light and dark theme, a show/hide password toggle, drag-and-drop uploads, and full keyboard support including the editor.
 
 ## Model results
@@ -83,7 +83,24 @@ cd frontend && npm install && npm run dev     # open the URL Vite prints (http:/
 
 Vite forwards `/api` and `/media` to FastAPI on port 8000. If Linux reports `ENOSPC` file-watcher errors, run `VITE_USE_POLLING=true npm run dev`.
 
-**Tests:** `python -m pytest`. The API tests need the Docker database running and use a separate `segmentation_test` database.
+**Tests and checks** (the same ones CI runs):
+
+```bash
+python -m pytest            # unit, API and migration tests (needs the Docker database; uses segmentation_test)
+ruff check . && ruff format --check .   # lint + formatting
+mypy                        # static type checking
+```
+
+**Database migrations (Alembic).** The app runs `alembic upgrade head` automatically at startup. After changing `backend/app/db/models.py`:
+
+```bash
+alembic revision --autogenerate -m "describe the change"   # review the generated file in backend/migrations/versions/
+alembic upgrade head        # or just restart the app
+```
+
+**Locked dependencies.** `requirements.lock` (server) and `requirements-dev.lock` (tests/tools) pin every package version, so the Docker image and CI always install the same versions. To update them: `pip install pip-tools`, then
+`pip-compile --strip-extras -o requirements.lock pyproject.toml` and
+`pip-compile --strip-extras --extra dev -c requirements.lock -o requirements-dev.lock pyproject.toml`.
 
 ## Train, evaluate and export the model
 
@@ -136,13 +153,13 @@ Errors: 401 (not signed in), 402 (not enough credits), 403 (wrong password on ac
 backend/app/
   api/          HTTP routes (auth, predictions, compositions, health)
   services/     auth, credits, rate_limit, jobs, inference (ONNX), realism, storage, retention
-  db/           SQLAlchemy models and session
+  db/           SQLAlchemy models and session; migrations/ holds the Alembic migration scripts
   core/         settings from environment variables, request middleware (request ID, logs, security headers)
 frontend/src/   React app: App.tsx + router.ts, pages/ (Create, History, Privacy), components/ (Composer, …)
 src/segmentation/  U-Net, dataset, training loop, checkpoint contract, ONNX export
 scripts/        prepare_data, train, verify_checkpoint, evaluate_test_split, export_onnx, db_admin
 tests/          unit tests + API tests against real PostgreSQL
-Dockerfile · docker-compose.yml · render.yaml · .github/workflows/ci.yml
+Dockerfile · docker-compose.yml · render.yaml · .github/workflows/ci.yml · alembic.ini · requirements*.lock
 ```
 
 ## Deployment

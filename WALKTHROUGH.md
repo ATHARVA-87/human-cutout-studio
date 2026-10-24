@@ -351,6 +351,31 @@ One middleware wraps every request:
   - `/docs` is excluded because FastAPI's docs page loads from a CDN.
 - **The font is self-hosted** (`@fontsource-variable/archivo`, bundled by Vite) instead of loaded from Google Fonts. The CSP can then stay strict, and no visitor IP addresses go to a third party, which matters for privacy law.
 
+### 7.12b Production hygiene: migrations, locked dependencies, code checks, non-root container, per-IP limits
+These were added after a self-review against industry standards (the gaps I'd expect an interviewer to probe).
+
+- **Database migrations with Alembic** ([backend/migrations](backend/migrations), [alembic.ini](alembic.ini)).
+  - *Problem before:* `create_all()` only creates *missing tables*. It can't add a column to an existing table, so every schema change needed a database reset. Not acceptable once real users have data.
+  - *Now:* each schema change is a small versioned script (`0001_baseline_schema.py`, `0002_per_ip_abuse_limits.py`), like Git commits for the database, each with an `upgrade()` and a `downgrade()`. The table `alembic_version` records where a database is.
+  - *At startup* the app runs `upgrade head` ([db/session.py](backend/app/db/session.py) `run_migrations`):
+    - It runs in **one transaction**, because PostgreSQL can roll back schema changes too.
+    - It runs behind an **advisory lock**, so two instances starting together never migrate at the same time.
+    - A database built before migrations existed (tables but no `alembic_version`) is **stamped** as the baseline, then upgraded. That's how my local database adopted Alembic without a reset.
+  - *Tested:* [tests/test_migrations.py](tests/test_migrations.py) builds an empty database, upgrades to the latest version, **downgrades back to nothing**, and upgrades again, which proves every migration is reversible.
+- **Locked dependencies** (`requirements.lock`, `requirements-dev.lock`, made with `pip-compile`).
+  - `pyproject.toml` says *what* is needed (`fastapi>=0.115`); the lock says *exactly which version* of every package, including indirect ones.
+  - Docker and CI install from the lock, so a build next month gets the same packages as today. No surprise breakage from a new release.
+- **Code checks in CI:**
+  - **ruff** finds likely bugs and unused code, sorts imports, and enforces one formatting style.
+  - **mypy** checks the type hints. It found 20 real "this could be None" gaps when first run: for example a missing model-loaded check in inference, and a value Pillow's API says can be `None`. Each now has an explicit check.
+  - CI fails if either complains.
+- **Non-root container:** the Dockerfile creates a user `app` (uid 10001) and switches to it. Only `uploads/` is writable. If the app were ever compromised, the attacker couldn't change the system or the app's code.
+- **Per-IP limits** ([services/rate_limit.py](backend/app/services/rate_limit.py)):
+  - **3 sign-ups per IP per day** stops one person farming free accounts.
+  - **20 failed logins per IP per 15 min** stops *password spraying*: one common password tried against many emails, which the per-email limit can't catch.
+  - IPs are stored only as a **salted hash** (HMAC). There are only about 4 billion IPv4 addresses, so a plain hash could be reversed by hashing them all; the secret salt prevents that. Records are deleted after 1 day.
+  - **Getting the real IP:** behind Render's proxy, every request seems to come from the proxy. `uvicorn --proxy-headers` with `FORWARDED_ALLOW_IPS="*"` (set only on Render, where all traffic goes through its proxy) reads the real client IP from `X-Forwarded-For`. Locally only 127.0.0.1 is trusted, so nobody can fake their IP with that header.
+
 ### 7.13 Privacy by design ([pages/PrivacyPage.tsx](frontend/src/pages/PrivacyPage.tsx))
 The privacy page ("Your privacy") is written **from the user's side**: "your photos are deleted after 5 days", "you can delete…", with no "we collect…". It reflects how the code actually behaves (an interviewer may check this):
 - **Data minimisation:** store a password *hash*, a token *hash* and an email *hash* for failed logins; log no personal data.
@@ -648,6 +673,11 @@ Numbers follow my original issue list (it had no item 8).
 | – | Unlimited password guessing | No login limit | 5 failed logins per 15 min per email |
 | – | Users couldn't delete their data | No endpoint | Delete items; delete account with password (CASCADE) |
 | – | Hard to trace a failing request | No request IDs | Request-ID + access-log middleware |
+| – | Schema changes needed a database reset | `create_all` can't alter tables | Alembic migrations, run at startup in one locked transaction; reversible, tested |
+| – | Builds could change without any code change | Only minimum versions in `pyproject.toml` | `requirements*.lock` used by Docker and CI |
+| – | No automatic code-quality gate | — | `ruff` + `mypy` in CI (mypy found 20 real gaps) |
+| – | Container ran as root | Default Docker user | Non-root `app` user |
+| – | One person could farm accounts or spray passwords | Limits were per email only | Per-IP sign-up and failed-login limits (salted IP hashes, 1 day) |
 | – | Underline jumped between Create and History | Each link drew its own border | One sliding underline + short page fade |
 | – | Photos and editor lost after visiting History | The Create page unmounted, so React discarded its state | Create page stays mounted (hidden) until sign-out |
 | – | "Edit again" always started from the default position | Placement was never saved | `composition_placements` table + debounced autosave `PUT`, restored on open |
@@ -668,6 +698,8 @@ Numbers follow my original issue list (it had no item 8).
 | My first fix stored `user.credits = new_value` after commit | That marks the row dirty, so a later commit could overwrite a parallel charge. Use `session.expire` instead |
 | Pillow's LAB a/b values looked wrong | They are signed bytes stored as unsigned; unwrap values above 127 |
 | `git rm -r` of a folder was blocked by my tool's safety check | Removed the two tracked files individually; git history keeps them anyway |
+| After switching the container to a non-root user, uploads failed locally | The old Docker volume was owned by root; `docker compose run --rm --user root --entrypoint "" app chown -R app:app /app/uploads` fixed it (new volumes and Render are fine) |
+| PyPI timed out while generating lock files | Retried with `--pip-args "--timeout 90 --retries 5"` |
 
 ---
 
@@ -701,9 +733,9 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 - **Images on the free tier are temporary;** in production, use S3 with presigned URLs.
 - **`/media` URLs** are unguessable but not access-checked; S3 presigned URLs fix this too.
 - **Sign-up abuse:** anyone can create many accounts for free credits. Add email verification, CAPTCHA, or a per-IP sign-up limit.
-- **Login limit is per email only:** add a per-IP limit against password spraying.
 - **Offset pagination** gets slow for very deep pages; switch to keyset pagination at scale.
-- **No migrations:** add Alembic before real users.
+- **No email verification or password reset:** needs an email-sending service; next step for real users.
+- **Single-instance inference:** at scale, move inference to a job queue (SQS/Celery) with worker containers.
 - **Realism:** no perspective or light-direction matching.
 
 ---
@@ -760,6 +792,10 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 39. *Offset vs keyset pagination?* Offset is simple and supports "page N" but scans skipped rows. Keyset (`WHERE created_at < last_seen`) stays fast at any depth but only supports next/previous.
 40. *What's in your privacy notice and why no cookie banner?* What I collect, why, retention, processors, rights, cookies. Only one strictly necessary cookie and no trackers, which are exempt from consent.
 41. *How does the editor remember where you left the person?* A debounced autosave `PUT` (0.5 s after the last change, plus a flush on close) upserts one row per composition, as fractions of the background. The history list includes it through a LEFT JOIN, so there are no N+1 queries.
+43. *How do you change the database schema in production?* With Alembic migrations: versioned upgrade/downgrade scripts. The app applies them at startup in one transaction behind an advisory lock, and a test runs them up, down and up again on an empty database.
+44. *What's a lock file for?* Reproducible builds. `pyproject.toml` lists acceptable ranges; the lock pins exact versions of everything, including indirect dependencies, so CI, Docker and production install identical packages.
+45. *How do you stop password spraying?* A per-IP failed-login limit (20 per 15 min) in addition to the per-email one, with IPs stored as salted hashes. Behind a proxy you must read the real IP from `X-Forwarded-For`, but only trust that header from your own proxy.
+46. *Why run the container as non-root?* Least privilege: a compromised process can't modify the system or the app's code.
 42. *Why did the Create page lose its state, and how did you fix it?* React state lives as long as the component is mounted. Navigating away unmounted it. Now it stays mounted but hidden, and is cleared on sign-out for privacy.
 
 ---

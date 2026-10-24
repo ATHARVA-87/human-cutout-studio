@@ -10,6 +10,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from backend.app.db.models import CreditTransaction, User
+from backend.app.db.session import rows_affected
 
 
 def charge(session: Session, user: User, amount: int, reason: str) -> None:
@@ -19,7 +20,7 @@ def charge(session: Session, user: User, amount: int, reason: str) -> None:
     parallel requests can never both spend the same credits. 0 rows updated = not enough credits.
     """
     result = session.execute(update(User).where(User.id == user.id, User.credits >= amount).values(credits=User.credits - amount))
-    if result.rowcount == 0:
+    if rows_affected(result) == 0:
         session.rollback()  # also undoes the rate-limit token taken in this transaction
         raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "Not enough credits. Recharge to continue.")
     session.add(CreditTransaction(user_id=user.id, amount=-amount, reason=reason))
@@ -39,7 +40,7 @@ def recharge(session: Session, user: User, minimum: int, amount: int) -> None:
     """Demo top-up of `amount` credits, allowed only when the balance is below `minimum`
     (the cost of the most expensive job). Adding a fixed amount keeps the ledger row exact."""
     result = session.execute(update(User).where(User.id == user.id, User.credits < minimum).values(credits=User.credits + amount))
-    if result.rowcount == 0:
+    if rows_affected(result) == 0:
         session.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Recharge is available when you have fewer than {minimum} credits.")
     session.add(CreditTransaction(user_id=user.id, amount=amount, reason="demo_recharge"))

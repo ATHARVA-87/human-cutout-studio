@@ -1,9 +1,15 @@
 from collections.abc import Generator
+from pathlib import Path
+from typing import Any, cast
 
-from sqlalchemy import create_engine
+from sqlalchemy import CursorResult, Result, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from backend.app.core.config import settings
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+BASELINE_REVISION = "0001"  # the first migration: the schema as it was before migrations were introduced
+MIGRATION_LOCK_ID = 2026_10_25  # names the PostgreSQL lock that lets only one app instance migrate at a time
 
 
 class Base(DeclarativeBase):
@@ -31,8 +37,28 @@ def get_session() -> Generator[Session, None, None]:
         session.close()
 
 
-def create_tables() -> None:
-    """Create any missing tables. Existing tables are left as they are (no migrations in this project)."""
-    from . import models  # noqa: F401  (importing registers the tables on Base.metadata)
+def rows_affected(result: Result[Any]) -> int:
+    """How many rows an UPDATE or DELETE changed. (SQLAlchemy's type hints only put .rowcount on CursorResult.)"""
+    return cast(CursorResult[Any], result).rowcount
 
-    Base.metadata.create_all(engine)
+
+def run_migrations() -> None:
+    """Bring the database schema up to date ("alembic upgrade head"). Runs at every startup; a no-op if current.
+
+    Everything happens in ONE transaction (PostgreSQL can roll back schema changes too), behind an advisory
+    lock, so two app instances starting at the same moment never migrate at the same time.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(PROJECT_ROOT / "backend" / "migrations"))
+    with engine.begin() as connection:
+        connection.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": MIGRATION_LOCK_ID})
+        config.attributes["connection"] = connection
+        tables = set(inspect(connection).get_table_names())
+        if "users" in tables and "alembic_version" not in tables:
+            # A database created before migrations existed already has the baseline tables:
+            # record it as being at the baseline, then apply only the newer migrations.
+            command.stamp(config, BASELINE_REVISION)
+        command.upgrade(config, "head")

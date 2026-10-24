@@ -29,7 +29,9 @@ def to_response(composition: Composition, placement: CompositionPlacement | None
         background_url=media_url(composition.background_path),
         cutout_url=media_url(composition.cutout_path),
         anchor_bottom=composition.anchor_bottom,
-        placement=Placement(x=placement.x, bottom=placement.bottom, height=placement.height, mirrored=placement.mirrored) if placement else None,
+        placement=Placement(x=placement.x, bottom=placement.bottom, height=placement.height, mirrored=placement.mirrored)
+        if placement
+        else None,
         credits=credits,
     )
 
@@ -81,7 +83,9 @@ def list_compositions(
 
 
 @router.get("/{composition_id}", response_model=CompositionResponse)
-def get_composition(composition_id: UUID, session: Session = Depends(get_session), user: User = Depends(current_user)) -> CompositionResponse:
+def get_composition(
+    composition_id: UUID, session: Session = Depends(get_session), user: User = Depends(current_user)
+) -> CompositionResponse:
     composition = get_owned(session, Composition, composition_id, user)
     return to_response(composition, session.get(CompositionPlacement, composition.id))
 
@@ -98,7 +102,9 @@ def save_placement(
     composition = get_owned(session, Composition, composition_id, user)
     values = body.model_dump()
     statement = insert(CompositionPlacement).values(composition_id=composition.id, **values)
-    statement = statement.on_conflict_do_update(index_elements=[CompositionPlacement.composition_id], set_={**values, "updated_at": func.now()})
+    statement = statement.on_conflict_do_update(
+        index_elements=[CompositionPlacement.composition_id], set_={**values, "updated_at": func.now()}
+    )
     session.execute(statement)
     session.commit()
 

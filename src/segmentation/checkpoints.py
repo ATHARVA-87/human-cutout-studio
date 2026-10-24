@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from torch import nn
 
@@ -65,7 +66,14 @@ def parse_checkpoint(checkpoint: Mapping[str, Any]) -> CheckpointSpec:
         format_version=int(checkpoint.get("format_version", 1)),
         architecture=str(checkpoint.get("architecture", ARCHITECTURE_UNET_V1)),
         model_config=dict(checkpoint["model_config"]),
-        preprocessing=PreprocessingSpec(height, width, tuple(float(x) for x in mean), tuple(float(x) for x in std), strategy, threshold),
+        preprocessing=PreprocessingSpec(
+            input_height=height,
+            input_width=width,
+            mean=(float(mean[0]), float(mean[1]), float(mean[2])),
+            std=(float(std[0]), float(std[1]), float(std[2])),
+            resize_strategy=strategy,
+            output_threshold=threshold,
+        ),
         epoch=int(checkpoint["epoch"]),
         best_validation_dice=float(checkpoint["best_validation_dice"]),
     )

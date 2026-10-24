@@ -40,7 +40,8 @@ export function PrivacyPage() {
         <li>
           <strong>Your credits and activity:</strong> your credit balance and history, a counter that limits how many jobs you can start,
           and a record of failed sign-in attempts on your email address. That record stores a one-way hash of the address, not the address
-          itself.
+          itself. When you sign up or a sign-in fails, a salted one-way hash of your IP address is kept for a day, so one network can't
+          create many accounts or guess many passwords. Your actual IP address is not stored.
         </li>
         <li>
           <strong>Your browser session:</strong> a cookie that keeps you signed in (see section 5). Each request you make is logged with its
@@ -74,7 +75,7 @@ export function PrivacyPage() {
             <td>{RETENTION_DAYS} days, then deleted automatically. You can delete them sooner yourself.</td>
           </tr>
           <tr>
-            <td>Failed sign-in attempts on your email</td>
+            <td>Failed sign-in attempts, and the hashed IP records from sign-ups and failed sign-ins</td>
             <td>1 day</td>
           </tr>
           <tr>

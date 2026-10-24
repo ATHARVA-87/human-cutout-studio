@@ -30,7 +30,10 @@ def main() -> None:
         logits = model(torch.zeros(1, 3, *size))
     if logits.shape != (1, 1, *size):
         raise ValueError(f"Unexpected output shape {tuple(logits.shape)}")
-    print(f"verified checkpoint: architecture={spec.architecture} epoch={spec.epoch} val_dice={spec.best_validation_dice:.4f} output={tuple(logits.shape)}")
+    print(
+        f"verified checkpoint: architecture={spec.architecture} epoch={spec.epoch} "
+        f"val_dice={spec.best_validation_dice:.4f} output={tuple(logits.shape)}"
+    )
 
 
 if __name__ == "__main__":

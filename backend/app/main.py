@@ -9,27 +9,27 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.api import auth, compositions, health, predictions
 from backend.app.core.config import settings
 from backend.app.core.middleware import request_context
-from backend.app.db.session import create_tables
+from backend.app.db.session import run_migrations
 from backend.app.services.inference import SegmentationService
 from backend.app.services.retention import cleanup_forever
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("alembic.runtime.plugins").setLevel(logging.WARNING)  # keep "Running upgrade ..." lines, drop setup noise
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Runs once at startup: create tables, load the model, start the data-retention job."""
+    """Runs once at startup: migrate the database schema, load the model, start the data-retention job."""
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     try:
-        create_tables()
+        run_migrations()  # alembic upgrade head
         app.state.database_error = None
-    except SQLAlchemyError as error:
-        # Keep starting so /api/health can report the problem instead of the server crashing.
+    except Exception as error:  # unreachable database or a failed migration
+        # Keep starting so /api/health can report the problem (with 503) instead of the server crashing.
         app.state.database_error = str(error).splitlines()[0]
     try:
         service = SegmentationService(settings.model_path, threads=settings.model_threads)

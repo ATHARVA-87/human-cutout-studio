@@ -36,7 +36,7 @@ def export_to_onnx(model: nn.Module, spec: CheckpointSpec, output: Path) -> None
     warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
     torch.onnx.export(
         model.eval(),
-        torch.zeros(1, 3, height, width),  # example input: ONNX records the graph by running it once
+        (torch.zeros(1, 3, height, width),),  # example input(s): ONNX records the graph by running it once
         str(output),
         input_names=["image"],
         output_names=["logits"],

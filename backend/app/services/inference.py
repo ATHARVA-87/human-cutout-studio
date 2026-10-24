@@ -90,13 +90,16 @@ class SegmentationService:
 
     def _probability_map(self, original: Image.Image) -> np.ndarray:
         """Run the U-Net at its training size, then resize the probabilities back to the original size."""
-        spec = self.preprocessing
+        if self.session is None or self.preprocessing is None:
+            raise RuntimeError("Segmentation model is not loaded")
+        spec, session = self.preprocessing, self.session
         resized, crop_box = self._resize_for_model(original, spec)
-        pixels = np.asarray(resized, dtype=np.float32) / 255.0  # H x W x 3, values 0..1
-        pixels = (pixels - np.array(spec.mean, dtype=np.float32)) / np.array(spec.std, dtype=np.float32)
+        mean, std = np.array(spec.mean, dtype=np.float32), np.array(spec.std, dtype=np.float32)
+        # H x W x 3 -> values 0..1 -> normalised like in training; float32 is what the ONNX model expects.
+        pixels = ((np.asarray(resized, dtype=np.float32) / 255.0 - mean) / std).astype(np.float32)
         batch = pixels.transpose(2, 0, 1)[np.newaxis]  # -> 1 x 3 x H x W, the layout the network expects
         with self._lock:
-            logits = self.session.run(None, {"image": np.ascontiguousarray(batch)})[0]
+            logits = session.run(None, {"image": np.ascontiguousarray(batch)})[0]
         # Sigmoid turns logits into the probability of "person". Clipping avoids exp() overflow warnings.
         probability = 1.0 / (1.0 + np.exp(-np.clip(logits[0, 0], -50, 50)))
         small = Image.fromarray(probability.astype(np.float32))  # float32 -> mode "F"

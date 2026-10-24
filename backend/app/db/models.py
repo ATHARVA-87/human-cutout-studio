@@ -62,6 +62,18 @@ class LoginAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class IpEvent(Base):
+    """Sign-ups and failed logins per client IP, for per-IP abuse limits. Stores a salted hash, not the IP."""
+
+    __tablename__ = "ip_events"
+    __table_args__ = (Index("ix_ip_events_ip_kind_created", "ip_hash", "kind", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    ip_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # "register" or "login_failure"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Prediction(Base):
     __tablename__ = "predictions"
     # Matches the history query: WHERE user_id = ? ORDER BY created_at DESC.

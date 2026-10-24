@@ -37,6 +37,7 @@ def main() -> None:
     output_images, output_masks = args.output_root / "images", args.output_root / "masks"
     if args.overwrite and args.output_root.exists():
         import shutil
+
         shutil.rmtree(args.output_root)
     output_images.mkdir(parents=True, exist_ok=True)
     output_masks.mkdir(parents=True, exist_ok=True)
@@ -59,7 +60,11 @@ def main() -> None:
                 raise ValueError(f"Source size mismatch for {name}: {image_file.size} vs {mask_file.size}")
             original_sizes[image_file.size] += 1
             image = image_file.convert("RGB").resize((args.size, args.size), Image.Resampling.BILINEAR)
-            mask = mask_file.convert("L").resize((args.size, args.size), Image.Resampling.NEAREST).point(lambda pixel: 255 if pixel > 127 else 0)
+            mask = (
+                mask_file.convert("L")
+                .resize((args.size, args.size), Image.Resampling.NEAREST)
+                .point(lambda pixel: 255 if pixel > 127 else 0)
+            )
             image.save(output_images / name)
             mask.save(output_masks / name)
     names = paired.copy()
@@ -75,7 +80,10 @@ def main() -> None:
         "source_summary": {"pairs": len(paired), "unique_source_dimensions": len(original_sizes)},
     }
     (args.output_root / "splits.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"Prepared {len(paired)} pairs at {args.size}x{args.size}: train={train_end}, validation={validation_end-train_end}, test={len(names)-validation_end}")
+    print(
+        f"Prepared {len(paired)} pairs at {args.size}x{args.size}: "
+        f"train={train_end}, validation={validation_end - train_end}, test={len(names) - validation_end}"
+    )
 
 
 if __name__ == "__main__":

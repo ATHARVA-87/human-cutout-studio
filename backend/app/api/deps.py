@@ -30,3 +30,9 @@ def get_owned(session: Session, model: type[Owned], item_id: UUID, user: User) -
     if item is None or item.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
     return item
+
+
+def client_ip(request: Request) -> str:
+    """The caller's IP. Behind Render's proxy, uvicorn's --proxy-headers puts the real one here
+    (from X-Forwarded-For) instead of the proxy's address; see the Dockerfile."""
+    return request.client.host if request.client else "unknown"

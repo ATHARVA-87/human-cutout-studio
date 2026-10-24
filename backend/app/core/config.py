@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Brute-force protection: this many failed logins for one email within the window -> HTTP 429.
     login_max_failures: int = 5
     login_window_minutes: int = 15
+    # Per-IP abuse limits: new accounts per IP per day, and failed logins per IP per login window
+    # (stops one person creating many free accounts, or trying one password against many emails).
+    registrations_per_ip_per_day: int = 3
+    login_failures_per_ip: int = 20
+    # Secret mixed into IP hashes so stored hashes can't be reversed by hashing every possible IP.
+    ip_hash_salt: str = "local-development-only"
 
 
 settings = Settings()

@@ -16,3 +16,6 @@ if not TEST_DATABASE_URL.rsplit("/", 1)[-1].split("?")[0].endswith("_test"):
 os.environ["SEGMENTATION_DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["SEGMENTATION_STORAGE_DIR"] = tempfile.mkdtemp(prefix="human-cutout-test-")
 os.environ["SEGMENTATION_MODEL_PATH"] = "does-not-exist.onnx"  # API tests use a fake model instead
+# All test users come from the same address ("testclient"): lift the per-IP limits except where a test sets them.
+os.environ["SEGMENTATION_REGISTRATIONS_PER_IP_PER_DAY"] = "100000"
+os.environ["SEGMENTATION_LOGIN_FAILURES_PER_IP"] = "100000"

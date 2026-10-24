@@ -14,5 +14,9 @@ services:
         sync: false # secret: Render asks for the Neon connection string when the Blueprint is created
       - key: SEGMENTATION_COOKIE_SECURE
         value: "true" # the site is HTTPS, so the session cookie is HTTPS-only
+      - key: SEGMENTATION_IP_HASH_SALT
+        generateValue: true # Render creates a random secret once; used to hash client IPs
+      - key: FORWARDED_ALLOW_IPS
+        value: "*" # all traffic reaches the app through Render's proxy, so trust its X-Forwarded-For
       - key: MODEL_URL
         value: https://huggingface.co/SUPER-87/human-cutout-unet/resolve/main/model.onnx

@@ -11,8 +11,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from segmentation.models import UNet, UNetConfig
 from segmentation.checkpoints import checkpoint_payload
+from segmentation.models import UNet
 
 
 def set_seed(seed: int) -> None:

@@ -41,17 +41,17 @@ def decode_image(contents: bytes, max_side: int | None = None) -> Image.Image:
     """
     max_side = max_side or settings.max_image_side
     try:
-        image = Image.open(io.BytesIO(contents))
-        if image.format not in ALLOWED_FORMATS:
-            raise ValueError(f"Unsupported format {image.format}")
-        image.verify()  # detects truncated/corrupt files
-        image = Image.open(io.BytesIO(contents))  # verify() consumes the image, so open again
-        if image.width * image.height > MAX_PIXELS:
+        probe = Image.open(io.BytesIO(contents))
+        if probe.format not in ALLOWED_FORMATS:
+            raise ValueError(f"Unsupported format {probe.format}")
+        probe.verify()  # detects truncated/corrupt files
+        opened = Image.open(io.BytesIO(contents))  # verify() consumes the image, so open again
+        if opened.width * opened.height > MAX_PIXELS:
             raise ValueError("Image has more than 40 megapixels.")
-        image.draft("RGB", (max_side, max_side))  # JPEG only: decode directly at a smaller size (saves memory)
+        opened.draft("RGB", (max_side, max_side))  # JPEG only: decode directly at a smaller size (saves memory)
         # Phones store portraits sideways plus an EXIF "rotate me" tag; apply it so people are upright.
-        image = ImageOps.exif_transpose(image)
-        image = image.convert("RGB")
+        upright: Image.Image = ImageOps.exif_transpose(opened) or opened  # (None only in in-place mode, unused here)
+        image = upright.convert("RGB")
         image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)  # keeps the aspect ratio
         return image
     except (OSError, ValueError, Image.DecompressionBombError) as error:

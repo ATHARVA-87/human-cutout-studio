@@ -42,7 +42,7 @@ if not ensure_test_database():
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from backend.app.db.models import CompositionPlacement, CreditTransaction, LoginAttempt, Prediction, RateLimitBucket, User  # noqa: E402
+from backend.app.db.models import CompositionPlacement, CreditTransaction, IpEvent, LoginAttempt, Prediction, RateLimitBucket, User  # noqa: E402
 from backend.app.db.session import SessionLocal  # noqa: E402
 from backend.app.main import app  # noqa: E402
 from backend.app.services.inference import SegmentationResult  # noqa: E402
@@ -242,9 +242,7 @@ def segment(browser: TestClient) -> dict:
 def test_history_pages_and_items_can_be_deleted(client) -> None:
     browser, _ = new_user(client)
     first, second = segment(browser), segment(browser)
-    composition = browser.post(
-        "/api/compositions", files={"person_image": image_file(), "background_image": image_file()}
-    ).json()
+    composition = browser.post("/api/compositions", files={"person_image": image_file(), "background_image": image_file()}).json()
     page = browser.get("/api/predictions?limit=1").json()
     assert page["total"] == 2 and len(page["items"]) == 1 and page["items"][0]["id"] == second["id"]  # newest first
     assert browser.get("/api/predictions?limit=0").status_code == 422
@@ -361,3 +359,32 @@ def test_deleting_a_composition_deletes_its_placement(client) -> None:
     assert browser.delete(f"/api/compositions/{composition['id']}").status_code == 204
     with SessionLocal() as session:
         assert session.get(CompositionPlacement, uuid.UUID(composition["id"])) is None  # ON DELETE CASCADE
+
+
+# ---------- per-IP abuse limits ----------
+
+
+def test_sign_ups_are_limited_per_ip(client, monkeypatch) -> None:
+    with SessionLocal() as session:  # start from a clean slate for this test's address
+        session.query(IpEvent).delete()
+        session.commit()
+    monkeypatch.setattr(settings, "registrations_per_ip_per_day", 2)
+    new_user(client)
+    new_user(client)
+    third = TestClient(app).post("/api/auth/register", json={"email": f"x-{uuid.uuid4().hex[:8]}@example.com", "password": "password123"})
+    assert third.status_code == 429 and "new accounts" in third.json()["detail"]
+
+
+def test_password_spraying_from_one_ip_is_blocked(client, monkeypatch) -> None:
+    with SessionLocal() as session:
+        session.query(IpEvent).delete()
+        session.commit()
+    monkeypatch.setattr(settings, "login_failures_per_ip", 3)
+    attacker = TestClient(app)
+    for _ in range(3):  # one guess each against three DIFFERENT accounts: the per-email limit never triggers
+        email = f"victim-{uuid.uuid4().hex[:8]}@example.com"
+        assert attacker.post("/api/auth/login", json={"email": email, "password": "Summer2026!"}).status_code == 401
+    blocked = attacker.post("/api/auth/login", json={"email": "another@example.com", "password": "Summer2026!"})
+    assert blocked.status_code == 429 and "your network" in blocked.json()["detail"]
+    with SessionLocal() as session:  # only hashes are stored, never the raw address
+        assert all(len(row.ip_hash) == 64 and "testclient" not in row.ip_hash for row in session.query(IpEvent))

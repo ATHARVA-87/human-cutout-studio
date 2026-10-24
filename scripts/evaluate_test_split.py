@@ -50,7 +50,10 @@ def main() -> None:
             target_pixels += masks.sum()
 
     dice = (2 * intersection + 1e-6) / (prediction_pixels + target_pixels + 1e-6)
-    print(f"test_samples={len(test_set)} global_dice={dice.item():.4f} threshold={spec.preprocessing.output_threshold:.2f} device={device.type}")
+    print(
+        f"test_samples={len(test_set)} global_dice={dice.item():.4f} "
+        f"threshold={spec.preprocessing.output_threshold:.2f} device={device.type}"
+    )
 
 
 if __name__ == "__main__":

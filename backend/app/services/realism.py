@@ -44,7 +44,10 @@ def _from_lab(lab: np.ndarray) -> Image.Image:
     encoded[..., 0] = np.clip(np.round(lab[..., 0]), 0, 255)
     encoded[..., 1:] = (np.clip(np.round(lab[..., 1:]), -128, 127).astype(np.int16) % 256).astype(np.uint8)
     lab_image = Image.frombytes("LAB", (lab.shape[1], lab.shape[0]), encoded.tobytes())
-    return ImageCms.applyTransform(lab_image, _TO_RGB)
+    rgb = ImageCms.applyTransform(lab_image, _TO_RGB)
+    if rgb is None:  # only happens in in-place mode, which isn't used here
+        raise RuntimeError("Colour conversion failed")
+    return rgb
 
 
 def match_colors(cutout: Image.Image, background: Image.Image, strength: float = 0.5) -> Image.Image:

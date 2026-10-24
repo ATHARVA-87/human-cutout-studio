@@ -30,8 +30,12 @@ def main() -> None:
     train_data = SegmentationDataset(args.data_root, "train", augment=True)
     validation_data = SegmentationDataset(args.data_root, "validation")
     pin_memory = torch.cuda.is_available()
-    train_loader = DataLoader(train_data, batch_size=config["batch_size"], shuffle=True, num_workers=config["num_workers"], pin_memory=pin_memory)
-    validation_loader = DataLoader(validation_data, batch_size=config["batch_size"], shuffle=False, num_workers=config["num_workers"], pin_memory=pin_memory)
+    train_loader = DataLoader(
+        train_data, batch_size=config["batch_size"], shuffle=True, num_workers=config["num_workers"], pin_memory=pin_memory
+    )
+    validation_loader = DataLoader(
+        validation_data, batch_size=config["batch_size"], shuffle=False, num_workers=config["num_workers"], pin_memory=pin_memory
+    )
     model = UNet(UNetConfig(base_channels=config["base_channels"], dropout=config["dropout"]))
     print(f"device={'cuda' if torch.cuda.is_available() else 'cpu'} train={len(train_data)} validation={len(validation_data)}")
     print(train(model, train_loader, validation_loader, config, args.checkpoint))
