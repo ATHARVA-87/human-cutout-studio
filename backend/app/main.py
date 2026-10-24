@@ -19,6 +19,7 @@ from backend.app.services.retention import cleanup_forever
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("alembic.runtime.plugins").setLevel(logging.WARNING)  # keep "Running upgrade ..." lines, drop setup noise
+logger = logging.getLogger("human_cutout.startup")
 
 
 @asynccontextmanager
@@ -31,12 +32,14 @@ async def lifespan(app: FastAPI):
     except Exception as error:  # unreachable database or a failed migration
         # Keep starting so /api/health can report the problem (with 503) instead of the server crashing.
         app.state.database_error = str(error).splitlines()[0]
+        logger.error("startup: database not ready: %s", app.state.database_error)
     try:
         service = SegmentationService(settings.model_path, threads=settings.model_threads)
         service.load()
         app.state.segmentation, app.state.model_error = service, None
     except Exception as error:  # missing or corrupt model.onnx: start anyway and report it in /api/health
         app.state.segmentation, app.state.model_error = None, str(error)
+        logger.error("startup: model not ready: %s", app.state.model_error)
 
     cleanup = asyncio.create_task(cleanup_forever())  # deletes data older than the retention period
     yield
