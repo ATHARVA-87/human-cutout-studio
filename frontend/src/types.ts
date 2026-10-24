@@ -22,6 +22,14 @@ export interface Prediction {
   credits: number | null;
 }
 
+/** Where the person was left in the editor, as fractions of the background image (saved on the server). */
+export interface SavedPlacement {
+  x: number;
+  bottom: number;
+  height: number;
+  mirrored: boolean;
+}
+
 export interface Composition {
   id: string;
   created_at: string;
@@ -29,6 +37,7 @@ export interface Composition {
   background_url: string;
   cutout_url: string;
   anchor_bottom: boolean; // person is cut off at the bottom of the photo -> keep them on the bottom edge
+  placement: SavedPlacement | null; // null until the user moves something in the editor
   credits: number | null;
 }
 

@@ -7,7 +7,7 @@ export function Footer() {
       <div className="shell">
         <p>Human Cutout is a portfolio project. Your uploads are deleted after {RETENTION_DAYS} days.</p>
         <nav aria-label="Footer">
-          <a href={href("privacy")}>Privacy notice</a>
+          <a href={href("privacy")}>Your privacy</a>
           <a href="https://github.com/ATHARVA-87/human-cutout-studio" target="_blank" rel="noreferrer">
             Source code
           </a>

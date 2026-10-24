@@ -42,7 +42,7 @@ if not ensure_test_database():
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from backend.app.db.models import CreditTransaction, LoginAttempt, Prediction, RateLimitBucket, User  # noqa: E402
+from backend.app.db.models import CompositionPlacement, CreditTransaction, LoginAttempt, Prediction, RateLimitBucket, User  # noqa: E402
 from backend.app.db.session import SessionLocal  # noqa: E402
 from backend.app.main import app  # noqa: E402
 from backend.app.services.inference import SegmentationResult  # noqa: E402
@@ -321,3 +321,43 @@ def test_security_headers_and_request_id(client) -> None:
     assert len(response.headers["X-Request-ID"]) == 12
     assert client.get("/api/health", headers={"X-Request-ID": "abc-123"}).headers["X-Request-ID"] == "abc-123"
     assert client.get("/api/health", headers={"X-Request-ID": "<script>"}).headers["X-Request-ID"] != "<script>"
+
+
+# ---------- editor placement autosave ----------
+
+
+def compose(browser: TestClient) -> dict:
+    response = browser.post("/api/compositions", files={"person_image": image_file(), "background_image": image_file()})
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_editor_placement_is_saved_and_restored(client) -> None:
+    browser, _ = new_user(client)
+    composition = compose(browser)
+    assert composition["placement"] is None  # never edited yet
+    placement = {"x": 0.3, "bottom": 0.9, "height": 0.55, "mirrored": True}
+    assert browser.put(f"/api/compositions/{composition['id']}/placement", json=placement).status_code == 204
+    assert browser.get(f"/api/compositions/{composition['id']}").json()["placement"] == placement
+    moved = {**placement, "x": 0.7}  # saving again updates the same row (upsert)
+    assert browser.put(f"/api/compositions/{composition['id']}/placement", json=moved).status_code == 204
+    listed = browser.get("/api/compositions").json()["items"][0]
+    assert listed["placement"] == moved  # the list includes it too (LEFT JOIN)
+
+
+def test_placement_is_validated_and_owner_only(client) -> None:
+    owner, _ = new_user(client)
+    composition = compose(owner)
+    url = f"/api/compositions/{composition['id']}/placement"
+    assert owner.put(url, json={"x": 1.5, "bottom": 0.9, "height": 0.5}).status_code == 422  # x must be 0-1
+    stranger, _ = new_user(client)
+    assert stranger.put(url, json={"x": 0.5, "bottom": 0.9, "height": 0.5}).status_code == 404
+
+
+def test_deleting_a_composition_deletes_its_placement(client) -> None:
+    browser, _ = new_user(client)
+    composition = compose(browser)
+    browser.put(f"/api/compositions/{composition['id']}/placement", json={"x": 0.5, "bottom": 1, "height": 0.6})
+    assert browser.delete(f"/api/compositions/{composition['id']}").status_code == 204
+    with SessionLocal() as session:
+        assert session.get(CompositionPlacement, uuid.UUID(composition["id"])) is None  # ON DELETE CASCADE

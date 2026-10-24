@@ -142,7 +142,17 @@ export function HistoryPage({ retentionDays, onApiError, onAccountDeleted }: His
       {(openPrediction || openComposition) && (
         <section className="mat history-open" ref={openRef} aria-label="Opened item">
           {tab === "cutouts" && openPrediction && <PredictionResult prediction={openPrediction} />}
-          {tab === "compositions" && openComposition && <Composer item={openComposition} />}
+          {tab === "compositions" && openComposition && (
+            <Composer
+              item={openComposition}
+              onSaved={(placement) =>
+                setCompositions((current) => ({
+                  ...current,
+                  items: current.items.map((item) => (item.id === openComposition.id ? { ...item, placement } : item)),
+                }))
+              }
+            />
+          )}
         </section>
       )}
 
@@ -223,7 +233,7 @@ function DeleteAccount({ onApiError, onDeleted }: { onApiError: (caught: unknown
       <h2 id="delete-account">Delete your account</h2>
       <p className="soft">
         This removes your account, credits and everything you made, right away. It can't be undone. The{" "}
-        <a href={href("privacy")}>privacy notice</a> lists what we store.
+        <a href={href("privacy")}>privacy page</a> explains what is kept about you.
       </p>
       {!open ? (
         <button className="button destructive" onClick={() => setOpen(true)}>

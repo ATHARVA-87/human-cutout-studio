@@ -3,166 +3,171 @@ import { RETENTION_DAYS } from "../types";
 const LAST_UPDATED = "24 October 2026";
 const CONTACT_URL = "https://github.com/ATHARVA-87";
 
-/** The public Privacy Notice (reachable without signing in at /#/privacy). */
+/** The public privacy notice (reachable without signing in at /#/privacy), written from the reader's side. */
 export function PrivacyPage() {
   return (
     <article className="legal">
-      <h1 className="page-title">Privacy notice</h1>
+      <h1 className="page-title">Your privacy</h1>
       <p className="soft">Last updated {LAST_UPDATED}</p>
 
       <p>
-        Human Cutout is a free, non-commercial portfolio project that cuts people out of photos with a machine-learning model. This
-        notice explains what personal data the service handles, why, for how long, and what choices you have. In short: we keep only what
-        is needed to run the service, your photos are deleted automatically after {RETENTION_DAYS} days, and nothing is sold, shared for
-        advertising, or used to train models.
+        This page explains what happens to your information when you use Human Cutout, a free portfolio project that cuts people out of
+        photos. The short version: you share only an email address, a password and the photos you choose to upload. Your photos and results
+        are deleted after {RETENTION_DAYS} days, they are never used to train the model, and nothing about you is sold or used for
+        advertising.
       </p>
 
-      <h2>1. Who is responsible</h2>
+      <h2>1. Who you can contact</h2>
       <p>
-        The service is run by its developer as a personal project (GitHub:{" "}
+        Human Cutout is run by one developer as a personal project. If you have a question or want something done with your data, contact
+        them through their GitHub profile:{" "}
         <a href={CONTACT_URL} target="_blank" rel="noreferrer">
           ATHARVA-87
         </a>
-        ). For any privacy question or request, contact the developer through that profile.
+        .
       </p>
 
-      <h2>2. What we collect</h2>
+      <h2>2. What you share, and what's kept</h2>
       <ul>
         <li>
-          <strong>Account data:</strong> your email address and your password. The password is never stored; only a salted, slow hash of
-          it (PBKDF2-SHA256) is kept.
+          <strong>Your account:</strong> your email address and your password. Your password itself is never stored, only a salted, slow
+          hash of it (PBKDF2-SHA256), so nobody can read it back.
         </li>
         <li>
-          <strong>Your content:</strong> photos you upload, the masks, cutouts and compositions generated from them, the original file name
-          and image size.
+          <strong>Your photos and results:</strong> the photos you upload, the masks, cutouts and combined photos made from them, where you
+          placed the person in the editor, and each photo's file name and size.
         </li>
         <li>
-          <strong>Usage records:</strong> your credit balance and credit history, rate-limit counters, and records of failed sign-in attempts
-          (stored as a one-way hash of the email address, not the address itself).
+          <strong>Your credits and activity:</strong> your credit balance and history, a counter that limits how many jobs you can start,
+          and a record of failed sign-in attempts on your email address. That record stores a one-way hash of the address, not the address
+          itself.
         </li>
         <li>
-          <strong>Technical data:</strong> a session cookie (see section 5). The application logs each API request with its method, path,
-          status, duration and a random request ID; it does not log email addresses, passwords or photos. Our hosting provider may
-          process IP addresses to deliver and protect the service.
+          <strong>Your browser session:</strong> a cookie that keeps you signed in (see section 5). Each request you make is logged with its
+          type, address, result, duration and a random ID. Your email address, password and photos are never written to these logs. The
+          hosting provider may see your IP address while delivering the site and protecting it from attacks.
         </li>
       </ul>
-      <p>We do not collect payment details, location, contacts, or any data from other websites.</p>
+      <p>You are never asked for payment details, your location or your contacts, and nothing is read from other websites you visit.</p>
 
-      <h2>3. Why we use it</h2>
+      <h2>3. How your information is used</h2>
       <ul>
-        <li>To provide the service you asked for: sign-in, processing your photos, showing your history, and counting credits.</li>
-        <li>To keep the service secure and fair: preventing password guessing, abuse and overload (rate limits).</li>
+        <li>To give you what you ask for: signing you in, processing your photos, showing your history and counting your credits.</li>
+        <li>To keep your account and the service safe: blocking password guessing, abuse and overload.</li>
       </ul>
       <p>
-        We do <strong>not</strong> use your photos or results to train or improve the model, we do not sell or rent personal data, we do
-        not show advertising, and we do not build profiles about you.
+        Your photos and results are <strong>never</strong> used to train or improve the model. Your information is not sold or rented, you
+        won't see advertising, and no profile is built about you.
       </p>
 
-      <h2>4. How long we keep it</h2>
+      <h2>4. How long your data is kept</h2>
       <table>
         <thead>
           <tr>
-            <th>Data</th>
+            <th>Your data</th>
             <th>Kept for</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>Uploaded photos, generated images and their history entries</td>
-            <td>{RETENTION_DAYS} days, then deleted automatically (or earlier if you delete them)</td>
+            <td>Your uploaded photos, results, editor positions and history</td>
+            <td>{RETENTION_DAYS} days, then deleted automatically. You can delete them sooner yourself.</td>
           </tr>
           <tr>
-            <td>Failed sign-in records</td>
+            <td>Failed sign-in attempts on your email</td>
             <td>1 day</td>
           </tr>
           <tr>
-            <td>Credit history</td>
+            <td>Your credit history</td>
             <td>30 days</td>
           </tr>
           <tr>
-            <td>Login session</td>
-            <td>Until you log out, sign in elsewhere, or 7 days pass</td>
+            <td>Your sign-in session</td>
+            <td>Until you log out, sign in on another device, or 7 days pass</td>
           </tr>
           <tr>
-            <td>Account (email, password hash, credit balance)</td>
+            <td>Your account (email, password hash, credit balance)</td>
             <td>Until you delete your account</td>
           </tr>
         </tbody>
       </table>
       <p>
-        On the free hosting plan, generated images are stored on temporary server storage and may disappear earlier, for example when the
-        server restarts. Download anything you want to keep.
+        Because the site runs on a free hosting plan, your generated images sit on temporary server storage and can disappear sooner, for
+        example when the server restarts. Download anything you want to keep.
       </p>
 
-      <h2>5. Cookies and local storage</h2>
+      <h2>5. Cookies and storage on your device</h2>
       <ul>
         <li>
-          <strong>human_cutout_session</strong>: a strictly necessary cookie that keeps you signed in. It is HTTP-only (scripts cannot read
-          it), sent only over HTTPS, and expires after 7 days.
+          <strong>human_cutout_session:</strong> keeps you signed in. Scripts on the page can't read it, it's only sent over a secure (HTTPS)
+          connection, and it expires after 7 days.
         </li>
         <li>
-          <strong>theme</strong> (browser local storage): remembers whether you chose the light or dark theme.
+          <strong>theme</strong> (stored in your browser): remembers whether you picked the light or dark theme.
         </li>
       </ul>
       <p>
-        There are no analytics, advertising or tracking cookies, and the site loads no third-party scripts or fonts. Because only strictly
-        necessary storage is used, no cookie consent banner is needed.
+        Nothing else is stored on your device: no analytics, advertising or tracking cookies, and no scripts or fonts from other companies.
+        Because only these strictly necessary items are used, you won't see a cookie banner.
       </p>
 
-      <h2>6. Who processes the data</h2>
-      <p>The service runs on two infrastructure providers that process data only on our behalf:</p>
+      <h2>6. Where your data is stored</h2>
+      <p>Your data is handled by two infrastructure providers, only to run this service:</p>
       <ul>
         <li>
-          <strong>Render</strong>: application hosting (runs the website and stores generated images temporarily).
+          <strong>Render</strong> runs the website and keeps your generated images for a short time.
         </li>
         <li>
-          <strong>Neon</strong>: managed PostgreSQL database (stores accounts, credits and history entries).
+          <strong>Neon</strong> hosts the database with your account, credits and history.
         </li>
       </ul>
       <p>
-        Both are configured to run in the Singapore region. The model file is downloaded from Hugging Face when the server is built; your
-        data is never sent there. No other third parties receive your data.
+        Both run in Singapore. The model file is downloaded from Hugging Face when the site is built; your data is never sent there, and no
+        one else receives it.
       </p>
 
-      <h2>7. How we protect it</h2>
+      <h2>7. How your data is protected</h2>
       <p>
-        HTTPS everywhere, hashed passwords and session tokens, HTTP-only session cookies, one active session per account, per-user access
-        checks on every request, rate limits on jobs and sign-in attempts, and strict browser security headers. Generated images are served
-        from long, random, unguessable links; anyone who has an exact link can open that image until it is deleted, so do not share links to
-        images you want to keep private.
+        Your connection is encrypted (HTTPS). Your password and session are stored only as hashes, your session cookie can't be read by
+        scripts, and you can be signed in on only one device at a time. Every request checks that you can only see your own data, and limits
+        stop people from guessing your password or flooding the service.
+      </p>
+      <p>
+        Your images are served from long, random links that can't be guessed. Anyone who has the exact link to one of your images can open
+        it until it's deleted, so don't share links to images you want to keep private.
       </p>
 
-      <h2>8. Your rights and choices</h2>
+      <h2>8. Your choices and rights</h2>
       <ul>
         <li>
-          <strong>See your data:</strong> the History page shows everything stored from your uploads.
+          <strong>See your data:</strong> the History page shows everything kept from your uploads.
         </li>
         <li>
-          <strong>Download it:</strong> every result has download buttons.
+          <strong>Take a copy:</strong> every result has download buttons.
         </li>
         <li>
-          <strong>Delete it:</strong> delete single items from History, or delete your whole account under History → Your data. Account
-          deletion removes all of the data listed above immediately.
+          <strong>Delete it:</strong> delete single items from History, or delete your whole account at the bottom of the History page.
+          Deleting your account removes everything listed above immediately.
         </li>
         <li>
-          <strong>Correct it:</strong> changing the email address is not supported; delete the account and create a new one.
+          <strong>Change it:</strong> you can't change your email address yet; delete your account and create a new one instead.
         </li>
         <li>
-          <strong>Complain:</strong> you can contact the developer, and you have the right to lodge a complaint with your local data
-          protection authority.
+          <strong>Complain:</strong> contact the developer, or the data protection authority where you live.
         </li>
       </ul>
 
-      <h2>9. Your responsibilities</h2>
+      <h2>9. Photos of other people</h2>
       <p>
-        Only upload photos you have the right to use. If a photo shows other people, make sure they agree. Do not upload sensitive images.
+        Only upload photos you have the right to use. If a photo shows other people, make sure they're okay with it, and don't upload
+        sensitive images.
       </p>
 
-      <h2>10. Children</h2>
-      <p>The service is not intended for anyone under 16, and we do not knowingly collect their data.</p>
+      <h2>10. Age</h2>
+      <p>You need to be at least 16 to use Human Cutout.</p>
 
-      <h2>11. Changes</h2>
-      <p>If this notice changes, the new version is published on this page with a new "Last updated" date.</p>
+      <h2>11. When this page changes</h2>
+      <p>If anything here changes, the new version appears on this page with a new "Last updated" date.</p>
     </article>
   );
 }

@@ -1,5 +1,6 @@
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
-import type { Composition } from "../types";
+import { api } from "../api/client";
+import type { Composition, SavedPlacement } from "../types";
 
 /** Where the person is, in BACKGROUND-IMAGE pixels: bottom-centre point (their feet) and height. */
 interface Placement {
@@ -15,6 +16,7 @@ interface LoadedImages {
 
 const MIN_HEIGHT = 0.05; // fraction of the background height
 const MAX_HEIGHT = 2;
+const SAVE_DELAY_MS = 500; // autosave this long after the last change
 
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -33,12 +35,32 @@ function initialPlacement({ background, cutout }: LoadedImages, anchorBottom: bo
   return { x: background.naturalWidth / 2, bottom, height };
 }
 
-export function Composer({ item }: { item: Composition }) {
+/** Saved fractions (0-1 of the background) -> pixels of this background image, and back. */
+function fromSaved(saved: SavedPlacement, background: HTMLImageElement): Placement {
+  return { x: saved.x * background.naturalWidth, bottom: saved.bottom * background.naturalHeight, height: saved.height * background.naturalHeight };
+}
+function toSaved(place: Placement, mirrored: boolean, background: HTMLImageElement): SavedPlacement {
+  return { x: place.x / background.naturalWidth, bottom: place.bottom / background.naturalHeight, height: place.height / background.naturalHeight, mirrored };
+}
+
+type SaveState = "idle" | "saving" | "saved" | "error";
+
+interface ComposerProps {
+  item: Composition;
+  onSaved?: (placement: SavedPlacement) => void; // lets the parent keep its copy of the composition up to date
+}
+
+export function Composer({ item, onSaved }: ComposerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [images, setImages] = useState<LoadedImages>();
   const [place, setPlace] = useState<Placement>();
   const [mirrored, setMirrored] = useState(false);
   const [loadError, setLoadError] = useState<string>();
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  // Autosave bookkeeping: `edited` is set only by the user's actions (so opening the editor never
+  // overwrites a saved placement); `pending` holds a change that hasn't been sent yet.
+  const edited = useRef(false);
+  const pending = useRef<SavedPlacement | null>(null);
   // While dragging: the distance between the pointer and the person's feet, so the person
   // does not jump to the cursor; it moves exactly as far as the mouse moves.
   const grab = useRef<{ dx: number; dy: number } | null>(null);
@@ -51,14 +73,16 @@ export function Composer({ item }: { item: Composition }) {
       .then(([background, cutout]) => {
         if (cancelled) return;
         setImages({ background, cutout });
-        setPlace(initialPlacement({ background, cutout }, item.anchor_bottom));
-        setMirrored(false);
+        // Continue where the user left off, if this composition was edited before.
+        setPlace(item.placement ? fromSaved(item.placement, background) : initialPlacement({ background, cutout }, item.anchor_bottom));
+        setMirrored(item.placement?.mirrored ?? false);
+        edited.current = false;
       })
       .catch(() => !cancelled && setLoadError("The images could not be loaded (the free server may have restarted). Please create the composition again."));
     return () => {
       cancelled = true;
     };
-  }, [item]);
+  }, [item.id, item.background_url, item.cutout_url]); // not [item]: saving a placement updates the object, which must not reload
 
   // 2) Redraw whenever the placement changes.
   useEffect(() => {
@@ -88,9 +112,43 @@ export function Composer({ item }: { item: Composition }) {
     context.restore();
   }, [images, place, mirrored, item.anchor_bottom]);
 
+  // Autosave: SAVE_DELAY_MS after the last change, send the placement to the server.
+  const save = (placement: SavedPlacement) => {
+    pending.current = null;
+    setSaveState("saving");
+    api
+      .savePlacement(item.id, placement)
+      .then(() => {
+        setSaveState("saved");
+        onSaved?.(placement);
+      })
+      .catch(() => setSaveState("error"));
+  };
+  useEffect(() => {
+    if (!edited.current || !place || !images) return;
+    pending.current = toSaved(place, mirrored, images.background);
+    setSaveState("saving");
+    const timer = window.setTimeout(() => pending.current && save(pending.current), SAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [place, mirrored]); // re-run (and restart the timer) only when the placement changes
+  // If the editor closes before the timer fires, send the last change right away.
+  useEffect(
+    () => () => {
+      if (pending.current) save(pending.current);
+    },
+    [], // empty list: the cleanup runs once, when the editor closes
+  );
+
+  /** Every user action goes through here, which marks the placement as edited (so it gets saved). */
+  const edit = (next: Placement | ((current: Placement | undefined) => Placement | undefined)) => {
+    edited.current = true;
+    setPlace(next);
+  };
+
   /** Resize around the feet (bottom-centre), so the person stays standing in the same spot. */
   const resize = (factor: number) => {
     if (!images) return;
+    edited.current = true;
     const sceneHeight = images.background.naturalHeight;
     setPlace((current) =>
       current && { ...current, height: Math.min(sceneHeight * MAX_HEIGHT, Math.max(sceneHeight * MIN_HEIGHT, current.height * factor)) },
@@ -136,7 +194,7 @@ export function Composer({ item }: { item: Composition }) {
     const x = Math.min(sceneWidth, Math.max(0, point.x - grab.current.dx));
     // A half-body person stays glued to the bottom edge: only horizontal movement.
     const bottom = item.anchor_bottom ? sceneHeight : Math.min(sceneHeight + place.height / 2, Math.max(place.height * 0.2, point.y - grab.current.dy));
-    setPlace({ ...place, x, bottom });
+    edit({ ...place, x, bottom });
   };
 
   const stopDragging = () => {
@@ -161,7 +219,7 @@ export function Composer({ item }: { item: Composition }) {
       const [dx, dy] = moves[event.key];
       const x = Math.min(sceneWidth, Math.max(0, place.x + dx));
       const bottom = item.anchor_bottom ? sceneHeight : Math.min(sceneHeight + place.height / 2, Math.max(place.height * 0.2, place.bottom + dy));
-      setPlace({ ...place, x, bottom });
+      edit({ ...place, x, bottom });
     } else if (event.key === "+" || event.key === "=") {
       event.preventDefault();
       resize(1.08);
@@ -198,7 +256,14 @@ export function Composer({ item }: { item: Composition }) {
         </p>
       )}
       <div className="toolbar">
-        <button className="button on-mat-outline" onClick={() => setMirrored((value) => !value)} aria-pressed={mirrored}>
+        <button
+          className="button on-mat-outline"
+          onClick={() => {
+            edited.current = true;
+            setMirrored((value) => !value);
+          }}
+          aria-pressed={mirrored}
+        >
           Mirror
         </button>
         <label className="size-control">
@@ -209,7 +274,7 @@ export function Composer({ item }: { item: Composition }) {
             max={MAX_HEIGHT * 100}
             value={sizePercent}
             onChange={(event) =>
-              images && setPlace((current) => current && { ...current, height: (Number(event.target.value) / 100) * images.background.naturalHeight })
+              images && edit((current) => current && { ...current, height: (Number(event.target.value) / 100) * images.background.naturalHeight })
             }
           />
         </label>
@@ -217,7 +282,15 @@ export function Composer({ item }: { item: Composition }) {
           Download image
         </button>
       </div>
-      <p className="editor-hint">Drag the person to move them. Scroll over the photo or use the slider to resize. Arrow keys work too.</p>
+      <p className="editor-hint">
+        Drag the person to move them. Scroll over the photo or use the slider to resize. Arrow keys work too.{" "}
+        <span role="status">
+          {saveState === "saving" && "Saving…"}
+          {saveState === "saved" && "Your changes are saved."}
+          {saveState === "error" && "Couldn't save your changes. They'll be saved with your next change."}
+          {saveState === "idle" && (item.placement ? "Continuing where you left off." : "Changes save automatically.")}
+        </span>
+      </p>
     </div>
   );
 }

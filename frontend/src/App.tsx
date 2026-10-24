@@ -97,46 +97,56 @@ export default function App() {
     />
   );
 
-  let page;
-  if (route === "privacy") {
-    page = <PrivacyPage />; // public: readable without an account
-  } else if (checkingSession) {
-    page = null;
-  } else if (!user) {
-    page = (
-      <AuthScreen
-        notice={notice}
-        onSignedIn={(account) => {
-          setNotice(undefined);
-          setUser(account);
-        }}
-      />
-    );
-  } else if (route === "history") {
-    page = (
-      <HistoryPage
-        retentionDays={user.retention_days}
-        onApiError={handleApiError}
-        onAccountDeleted={() => signOut("Your account and all of its data were deleted.")}
-      />
-    );
-  } else {
-    page = (
-      <CreatePage
-        user={user}
-        busy={busy}
-        setBusy={setBusy}
-        onCredits={(credits) => setUser((current) => current && { ...current, credits })}
-        onNeedCredits={setRechargeCost}
-        onApiError={handleApiError}
-      />
-    );
-  }
+  // Which page is visible. The Create page stays MOUNTED (just hidden) while you look at History or
+  // Privacy, so chosen photos, results and the editor keep their state when you come back.
+  // It is unmounted (and its state cleared) only when you sign out.
+  const showAuth = !checkingSession && !user && route !== "privacy";
+  const pages = (
+    <>
+      {route === "privacy" && (
+        <div className="page">
+          <PrivacyPage />
+        </div>
+      )}
+      {showAuth && (
+        <div className="page">
+          <AuthScreen
+            notice={notice}
+            onSignedIn={(account) => {
+              setNotice(undefined);
+              setUser(account);
+            }}
+          />
+        </div>
+      )}
+      {user && (
+        <div className="page" hidden={route !== "create"}>
+          <CreatePage
+            user={user}
+            busy={busy}
+            setBusy={setBusy}
+            onCredits={(credits) => setUser((current) => current && { ...current, credits })}
+            onNeedCredits={setRechargeCost}
+            onApiError={handleApiError}
+          />
+        </div>
+      )}
+      {user && route === "history" && (
+        <div className="page">
+          <HistoryPage
+            retentionDays={user.retention_days}
+            onApiError={handleApiError}
+            onAccountDeleted={() => signOut("Your account and all of its data were deleted.")}
+          />
+        </div>
+      )}
+    </>
+  );
 
   return (
     <>
       {header}
-      <main className="shell">{page}</main>
+      <main className="shell">{pages}</main>
       {user && rechargeCost !== undefined && (
         <RechargeModal credits={user.credits} cost={rechargeCost} busy={busy} onRecharge={recharge} onClose={() => setRechargeCost(undefined)} />
       )}

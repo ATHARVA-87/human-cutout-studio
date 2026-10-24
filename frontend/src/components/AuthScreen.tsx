@@ -104,8 +104,8 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
           </button>
         </div>
         <p className="fine-print">
-          By creating an account you agree to the <a href={href("privacy")}>privacy notice</a>. Your uploads are deleted after {RETENTION_DAYS}{" "}
-          days. Only upload photos you have the right to use.
+          Creating an account means you accept how your data is handled, as described on the <a href={href("privacy")}>privacy page</a>.
+          Your uploads are deleted after {RETENTION_DAYS} days. Only upload photos you have the right to use.
         </p>
       </form>
     </section>

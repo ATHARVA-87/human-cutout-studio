@@ -106,7 +106,7 @@ export function CreatePage({ user, busy, setBusy, onCredits, onNeedCredits, onAp
 
         <section className="mat" aria-live="polite" aria-label="Result">
           {result && <PredictionResult prediction={result} />}
-          {composition && <Composer item={composition} />}
+          {composition && <Composer item={composition} onSaved={(placement) => setComposition((current) => current && { ...current, placement })} />}
           {!result && !composition && (
             <div className="mat-empty">
               <strong>{busy ? "Cutting out the person…" : "Your result appears here"}</strong>

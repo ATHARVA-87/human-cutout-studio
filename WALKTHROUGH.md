@@ -297,6 +297,20 @@ After all decisions were final, I ran the 268 test images once: **global Dice 0.
 - **Delete:** delete the row, **commit**, *then* delete the `uploads/<uuid>/` folder. In that order a crash can leave an orphan folder (which the cleanup job later removes), but never a history row pointing at missing files that I just deleted on purpose. `delete_job_folder` refuses any path that isn't exactly `uploads/<uuid>/`.
 - Every item includes `expires_at = created_at + 5 days`, so the UI can say "deleted in N days".
 
+### 7.8b Editor autosave ("Edit again" continues where you left off) ([api/compositions.py](backend/app/api/compositions.py), [components/Composer.tsx](frontend/src/components/Composer.tsx))
+- **Table:** `composition_placements` has one row per composition, and the composition id is the primary key. It stores `x`, `bottom`, `height` as **fractions of the background image** (so they don't depend on screen size) plus `mirrored`. It's deleted with its composition (`ON DELETE CASCADE`), so the 5-day cleanup and account deletion remove it too. Being a *new* table, `create_all` created it without a migration.
+- **API:** `PUT /api/compositions/{id}/placement`.
+  - **PUT is idempotent:** sending the same body twice leaves the same state.
+  - The server does an upsert (`INSERT … ON CONFLICT (composition_id) DO UPDATE`), the same pattern as one-session-per-user.
+  - Pydantic validates the ranges (x 0–1, height 0.01–2), and `get_owned` makes it owner-only (404 otherwise).
+- **No N+1 queries:** the history list loads compositions *and* their placements in **one** query with a `LEFT OUTER JOIN`. Otherwise it would need 1 query for the list plus 1 per item.
+- **Frontend autosave:**
+  - Every user action (drag, wheel, slider, keys, mirror) marks the editor as *edited*. Simply opening it never overwrites a saved placement.
+  - A **debounce** sends the save 0.5 s after the last change, so a drag doesn't send 60 requests per second.
+  - If the editor closes before that, the pending change is sent at once (`fetch` with `keepalive`, so it survives leaving the page).
+  - A status line says Saving… / saved / couldn't save.
+- **Last write wins:** if the same composition is open in two places and edited in both, the later save wins. That's acceptable for a single-user editor.
+
 ### 7.9 Failed-login limit ([services/rate_limit.py](backend/app/services/rate_limit.py), bottom half)
 - **Rule:** each failed login inserts a row into `login_attempts` with a **SHA-256 of the email**, not the email itself, because attempts are often for addresses that have no account.
 - **Check first:** before checking a password, count failures for that email in the last 15 minutes. At 5, answer **429** with `Retry-After`, *before* running the slow PBKDF2 hash. Guessing becomes slow, and spamming can't burn our CPU.
@@ -311,7 +325,7 @@ After all decisions were final, I ran the 268 test images once: **global Dice 0.
 ### 7.11 Automatic data retention: the 5-day cleanup job ([services/retention.py](backend/app/services/retention.py))
 | Data | Deleted after |
 | --- | --- |
-| Uploads, results, history rows | 5 days (`SEGMENTATION_RETENTION_DAYS`) |
+| Uploads, results, history rows, saved editor positions | 5 days (`SEGMENTATION_RETENTION_DAYS`) |
 | Expired sessions | when expired (7 days) |
 | Failed-login rows | 1 day |
 | Credit ledger rows | 30 days |
@@ -338,7 +352,7 @@ One middleware wraps every request:
 - **The font is self-hosted** (`@fontsource-variable/archivo`, bundled by Vite) instead of loaded from Google Fonts. The CSP can then stay strict, and no visitor IP addresses go to a third party, which matters for privacy law.
 
 ### 7.13 Privacy by design ([pages/PrivacyPage.tsx](frontend/src/pages/PrivacyPage.tsx))
-The Privacy Notice reflects how the code actually behaves (an interviewer may check this):
+The privacy page ("Your privacy") is written **from the user's side**: "your photos are deleted after 5 days", "you can delete…", with no "we collect…". It reflects how the code actually behaves (an interviewer may check this):
 - **Data minimisation:** store a password *hash*, a token *hash* and an email *hash* for failed logins; log no personal data.
 - **Storage limitation:** the 5-day retention job.
 - **User rights:** see (History), download (buttons), delete (items or the whole account).
@@ -398,6 +412,10 @@ login_attempts                       (email_hash + created_at; no foreign key: a
 
 **Files** ([frontend/src](frontend/src))
 - `App.tsx` holds app-wide state (who is signed in, theme, recharge dialog), handles API errors in one place, and picks the page.
+  - The **Create page stays mounted** (hidden with the `hidden` attribute) while you're on History or Privacy, so your chosen photos, result and editor survive the round trip. React only keeps a component's state while it's mounted.
+  - It's unmounted (and its state cleared) when you sign out, so the next person on the same computer can't see your photos.
+  - The History page *does* remount each time, so it always fetches fresh data.
+- **Header underline:** one element *slides* to the active link. `useLayoutEffect` measures the link's position, and CSS transitions `transform`/`width`; it re-measures on resize and after the font loads. Before, each link drew its own border, so it jumped. Pages also fade in briefly. Both are disabled for reduced motion.
 - `router.ts`: a tiny **hash router**. The page is chosen by the part after `#` (`#/`, `#/history`, `#/privacy`). Changing it never reloads the page, and back/forward work. No routing library is needed for three pages.
 - `pages/`:
   - `CreatePage` (operations, upload, results);
@@ -630,6 +648,9 @@ Numbers follow my original issue list (it had no item 8).
 | – | Unlimited password guessing | No login limit | 5 failed logins per 15 min per email |
 | – | Users couldn't delete their data | No endpoint | Delete items; delete account with password (CASCADE) |
 | – | Hard to trace a failing request | No request IDs | Request-ID + access-log middleware |
+| – | Underline jumped between Create and History | Each link drew its own border | One sliding underline + short page fade |
+| – | Photos and editor lost after visiting History | The Create page unmounted, so React discarded its state | Create page stays mounted (hidden) until sign-out |
+| – | "Edit again" always started from the default position | Placement was never saved | `composition_placements` table + debounced autosave `PUT`, restored on open |
 
 ---
 
@@ -737,6 +758,8 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 37. *What does your Content Security Policy do?* Lets the browser load scripts, styles, fonts and API calls only from our own origin, blocks plugins and framing. Self-hosting fonts made `'self'` possible.
 38. *How would you debug a user's failed request in production?* Ask for the `X-Request-ID` from the response (or the UI), then search the logs for it: one line with method, path, status and duration.
 39. *Offset vs keyset pagination?* Offset is simple and supports "page N" but scans skipped rows. Keyset (`WHERE created_at < last_seen`) stays fast at any depth but only supports next/previous.
+41. *How does the editor remember where you left the person?* A debounced autosave `PUT` (0.5 s after the last change, plus a flush on close) upserts one row per composition, as fractions of the background. The history list includes it through a LEFT JOIN, so there are no N+1 queries.
+42. *Why did the Create page lose its state, and how did you fix it?* React state lives as long as the component is mounted. Navigating away unmounted it. Now it stays mounted but hidden, and is cleared on sign-out for privacy.
 40. *What's in your privacy notice and why no cookie banner?* What I collect, why, retention, processors, rights, cookies. Only one strictly necessary cookie and no trackers, which are exempt from consent.
 
 ---

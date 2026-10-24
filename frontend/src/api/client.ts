@@ -1,4 +1,4 @@
-import type { Account, Composition, Page, Prediction } from "../types";
+import type { Account, Composition, Page, Prediction, SavedPlacement } from "../types";
 
 const PAGE_SIZE = 12;
 
@@ -61,6 +61,14 @@ export const api = {
   listCompositions: (offset = 0) => request<Page<Composition>>(`/api/compositions?limit=${PAGE_SIZE}&offset=${offset}`),
   deletePrediction: (id: string) => request<void>(`/api/predictions/${id}`, { method: "DELETE" }),
   deleteComposition: (id: string) => request<void>(`/api/compositions/${id}`, { method: "DELETE" }),
+  // keepalive lets a save that starts while the page is being left still reach the server.
+  savePlacement: (id: string, placement: SavedPlacement) =>
+    request<void>(`/api/compositions/${id}/placement`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(placement),
+      keepalive: true,
+    }),
   deleteAccount: (password: string) =>
     request<void>("/api/auth/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) }),
 };

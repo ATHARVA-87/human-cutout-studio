@@ -90,3 +90,19 @@ class Composition(Base):
     cutout_path: Mapped[str] = mapped_column(Text, nullable=False)
     # True when the person was cut off at the bottom of the source photo (e.g. a half-body shot).
     anchor_bottom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class CompositionPlacement(Base):
+    """Where the user left the person in the editor, so "Edit again" continues from there.
+
+    Stored as fractions of the background image (0-1), so the values don't depend on screen size.
+    One row per composition (the composition id is the primary key); deleted with the composition.
+    """
+
+    __tablename__ = "composition_placements"
+    composition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("compositions.id", ondelete="CASCADE"), primary_key=True)
+    x: Mapped[float] = mapped_column(Float, nullable=False)  # feet position, fraction of background width
+    bottom: Mapped[float] = mapped_column(Float, nullable=False)  # feet position, fraction of background height
+    height: Mapped[float] = mapped_column(Float, nullable=False)  # person height, fraction of background height
+    mirrored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

@@ -42,6 +42,15 @@ class PredictionListResponse(BaseModel):
     total: int
 
 
+class Placement(BaseModel):
+    """Editor position as fractions of the background image. The ranges match the editor's limits."""
+
+    x: float = Field(ge=0, le=1)
+    bottom: float = Field(ge=0, le=2)  # the feet may go below the bottom edge (part of the person hidden)
+    height: float = Field(ge=0.01, le=2)
+    mirrored: bool = False
+
+
 class CompositionResponse(BaseModel):
     id: UUID
     created_at: datetime
@@ -49,6 +58,7 @@ class CompositionResponse(BaseModel):
     background_url: str
     cutout_url: str
     anchor_bottom: bool
+    placement: Placement | None = None  # where the user left the person last time (None = never edited)
     credits: int | None = None  # balance after this job (only on create)
 
 

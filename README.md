@@ -12,9 +12,9 @@ A U-Net trained from scratch to separate people from the background, served as a
 
 - **Person segmentation** (1 credit): binary mask, transparent cutout with soft edges, and a tinted overlay.
 - **Combine with another image** (2 credits): the person is cropped, colour-matched to the new background, and placed in a canvas editor. Drag to move, scroll or use the slider to resize, mirror, and download a PNG. Half-body photos stay glued to the bottom edge; full-body ones get a soft contact shadow.
-- **History**: a separate page lists your past cutouts and compositions (paginated). Open a result again, reopen a composition in the editor, or delete it.
+- **History**: a separate page lists your past cutouts and compositions (paginated). Open a result again, or reopen a composition **exactly where you left it**: the editor autosaves the position, size and mirroring. Leaving the Create page and coming back keeps your photos and results.
 - **Accounts and credits**: 30 free credits on sign-up, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
-- **Privacy by design**: a full [Privacy Notice](frontend/src/pages/PrivacyPage.tsx) page. Uploads and results are **deleted automatically after 5 days**. Self-service account deletion. One strictly necessary cookie, no trackers, self-hosted fonts.
+- **Privacy by design**: a full [privacy page](frontend/src/pages/PrivacyPage.tsx) written from the user's side. Uploads and results are **deleted automatically after 5 days**. Self-service account deletion. One strictly necessary cookie, no trackers, self-hosted fonts.
 - **Security**: salted password hashing, hashed session tokens, HTTP-only cookies, a limit of 5 failed sign-ins per 15 minutes, per-user access checks, a strict Content Security Policy and security headers, and a request ID on every response.
 - **Design**: a cutting-mat workspace, the editor's "marching ants" selection and the transparency checkerboard as the visual language. Light and dark theme, a show/hide password toggle, drag-and-drop uploads, and full keyboard support including the editor.
 
@@ -125,6 +125,7 @@ SEGMENTATION_DATABASE_URL='postgresql+psycopg://…neon.tech/neondb?sslmode=requ
 | DELETE | `/api/predictions/{id}` | removes the row and its files |
 | POST | `/api/compositions` | multipart `person_image` + `background_image`; 2 credits |
 | GET / DELETE | `/api/compositions`, `/api/compositions/{id}` | same pattern as predictions |
+| PUT | `/api/compositions/{id}/placement` | JSON `{x, bottom, height, mirrored}` (fractions of the background); the editor autosaves here so "Edit again" continues where you left off |
 | GET | `/api/health` | model and database status (503 when degraded) |
 
 Errors: 401 (not signed in), 402 (not enough credits), 403 (wrong password on account deletion), 404 (not found or not yours), 415 (not JPG/PNG), 429 (rate limited or too many failed sign-ins, with `Retry-After`). Interactive docs: `/docs`.
