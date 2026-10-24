@@ -43,7 +43,8 @@ This is my personal revision guide. It assumes I remember nothing about the proj
 **5 minutes.** Walk through §6 (one request from click to pixels) and mention:
 - the memory story in §11 (955 → 463 → 378 MiB);
 - the deployment choice in §13 (Render + Neon + Hugging Face; why not Oracle or AWS);
-- the bugs I fixed in §14.
+- the bugs I fixed in §14;
+- the production touches: History page, 5-day automatic data retention, account deletion, login limit, privacy notice, CSP (§7.8–7.13).
 
 ---
 
@@ -93,7 +94,11 @@ This is my personal revision guide. It assumes I remember nothing about the proj
 3. **Out of credits:** a dialog offers a free demo recharge (+30), allowed only when you have fewer than 2 credits.
 4. **Rate limit:** at most 10 jobs per 30 minutes per user; the 11th says how many minutes to wait.
 5. **One session:** logging in on another browser signs out the first one.
-6. **Header:** credits, Recharge, ☀/☾ theme toggle, Log out.
+6. **Header:** Create / History links, credits, Recharge, ☀/☾ theme toggle, Log out. The password field has a **Show/Hide** button.
+7. **History page** (`/#/history`): tabs for Cutouts and Compositions, newest first, "Load more". Each card shows when it will be deleted ("deleted in 3 d"). **Open** shows the result again, **Edit again** reopens a composition in the editor, **Delete** removes it and its files.
+8. **Your data** (bottom of History): **Delete my account** after re-entering the password. Everything is erased.
+9. **Privacy Notice** (`/#/privacy`, footer link, also linked under the sign-up button): readable without an account.
+10. **Automatic cleanup:** uploads, results and history older than **5 days** are deleted by the server.
 
 ---
 
@@ -123,6 +128,21 @@ So I chose a stack that lets me talk about exactly those things:
 - **Why React, not plain HTML?** Many interacting pieces of state (auth, mode, files, results, dialogs). It's also the internship stack.
 - **Why a canvas editor?** The download must match exactly what the user sees. Drawing on a canvas and exporting `toDataURL` guarantees that.
 - **Why ONNX Runtime for serving?** Measured: it fits the free 512 MB server with a margin, and the Docker image is about 1 GB smaller (§11).
+
+### 4.1 What a backend-focused interviewer looks for, and where it is
+
+| They check | Where to point them |
+| --- | --- |
+| Clear layers (routes → services → database) | `api/` only does HTTP; logic lives in `services/`; tables in `db/models.py` (§7) |
+| Correctness under concurrency | Conditional credit UPDATE, `SELECT … FOR UPDATE` bucket, unique-session upsert, advisory-locked cleanup (§8) |
+| Database fundamentals | Constraints (`UNIQUE`, `CHECK`, `ON DELETE CASCADE`), composite indexes matching the queries, transactions (§8) |
+| Authentication and security | PBKDF2, hashed tokens, HttpOnly/SameSite/Secure cookie, login limit, 404-not-403 ownership checks, CSP and headers (§7.3, §7.9, §7.12) |
+| API design | Proper status codes (201/204/401/402/403/404/415/429/503), `Retry-After`, validation with Pydantic/`Query`, pagination, OpenAPI docs at `/docs` (§7.8) |
+| Data lifecycle and privacy | Retention job, delete item/account, privacy notice that matches the code, minimal logging (§7.10–7.13) |
+| Operability | Health check that returns 503, request IDs, structured access logs, settings from env vars (§7.1, §7.12) |
+| Performance and limits | Thread pool for CPU work, upload size/resolution caps, measured memory 955 → 378 MiB (§11) |
+| Testing and CI | 43 tests incl. API tests against real Postgres with a fake model; CI with a Postgres service container; deploy only when green (§12) |
+| Honest trade-offs | Offset vs keyset pagination, per-email vs per-IP limits, local disk vs S3, no Alembic yet (§17) |
 
 ---
 
@@ -268,6 +288,64 @@ After all decisions were final, I ran the 268 test images once: **global Dice 0.
 - A `threading.Lock` lets one image use the model at a time, which keeps memory predictable on a 512 MB server. ONNX Runtime uses 1 thread to match the free tier's 0.1 CPU.
 - Plain `def` dependencies such as `current_user` already run in FastAPI's thread pool. The short rate-limit/credit queries inside the `async` route still run on the event loop; they take milliseconds. A fully async version would use an async database driver, which wasn't worth the extra complexity here.
 
+### 7.8 History and pagination ([api/predictions.py](backend/app/api/predictions.py), [api/compositions.py](backend/app/api/compositions.py), [api/deps.py](backend/app/api/deps.py))
+- `GET /api/predictions?limit=12&offset=0` returns `{items, total}`, newest first, using the `(user_id, created_at)` index.
+  - `Query(ge=1, le=100)` makes FastAPI reject bad paging values with 422 automatically.
+  - This is **offset pagination**: simple, and page N is easy to jump to. With millions of rows, deep offsets get slow, and I'd switch to **keyset pagination** (`WHERE created_at < :last_seen ORDER BY created_at DESC LIMIT 12`).
+- Compositions have the same list, get and delete endpoints.
+- **Ownership checks:** `get_owned()` returns 404 for "doesn't exist" *and* "belongs to someone else", so other users' IDs are never confirmed (a defence against IDOR, insecure direct object references).
+- **Delete:** delete the row, **commit**, *then* delete the `uploads/<uuid>/` folder. In that order a crash can leave an orphan folder (which the cleanup job later removes), but never a history row pointing at missing files that I just deleted on purpose. `delete_job_folder` refuses any path that isn't exactly `uploads/<uuid>/`.
+- Every item includes `expires_at = created_at + 5 days`, so the UI can say "deleted in N days".
+
+### 7.9 Failed-login limit ([services/rate_limit.py](backend/app/services/rate_limit.py), bottom half)
+- **Rule:** each failed login inserts a row into `login_attempts` with a **SHA-256 of the email**, not the email itself, because attempts are often for addresses that have no account.
+- **Check first:** before checking a password, count failures for that email in the last 15 minutes. At 5, answer **429** with `Retry-After`, *before* running the slow PBKDF2 hash. Guessing becomes slow, and spamming can't burn our CPU.
+- **Reset:** a successful login clears the failures. Rows older than 1 day are removed by the cleanup job.
+- The delete-account endpoint uses the same limit, so a stolen session can't be used to guess the password.
+- **Honest limit:** it is per email. One attacker trying one password on *many* emails (password spraying) would need a per-IP limit too.
+
+### 7.10 Delete account ("right to erasure") ([api/auth.py](backend/app/api/auth.py))
+- `DELETE /api/auth/account` with `{password}`. The password is asked again because a session alone shouldn't be enough to destroy an account.
+- One `DELETE FROM users WHERE id = …`. Every foreign key to `users` is declared `ON DELETE CASCADE`, so PostgreSQL removes sessions, ledger, bucket and history rows **in the same transaction**. Afterwards the image folders are deleted and the cookie is cleared.
+
+### 7.11 Automatic data retention: the 5-day cleanup job ([services/retention.py](backend/app/services/retention.py))
+| Data | Deleted after |
+| --- | --- |
+| Uploads, results, history rows | 5 days (`SEGMENTATION_RETENTION_DAYS`) |
+| Expired sessions | when expired (7 days) |
+| Failed-login rows | 1 day |
+| Credit ledger rows | 30 days |
+| Accounts | only when the user deletes them |
+
+- **When it runs:** an `asyncio` background task started in `lifespan` runs `run_cleanup()` **at startup and then every 60 minutes** (in a worker thread, so it doesn't block requests).
+  - On the free tier the server sleeps when idle, so a timer that literally fires "every 5 days" could simply never fire.
+  - Running at every wake-up plus hourly guarantees nothing lives much longer than 5 days. No new data is created while the server sleeps anyway.
+- **Only one copy cleans:** `SELECT pg_try_advisory_xact_lock(<id>)` is a PostgreSQL *advisory lock*, a named lock not tied to any table. If two app instances run the job at once, only one gets it; the other skips. It is released automatically at COMMIT.
+- **Rows vs files:** rows are deleted by `created_at`. Files are deleted by **folder age** (`mtime`), which also catches orphan folders whose row was never written (e.g. a crash mid-job).
+- **Proof it works:** the first time it ran locally, it deleted 25 cutouts and 8 compositions left over from testing 5 days earlier (see the container log line `cleanup done: CleanupReport(...)`).
+- Manual run: `python scripts/db_admin.py cleanup`.
+- *Why not cron or GitHub Actions?* A scheduled GitHub workflow could clean the database but can't reach files on the Render server's disk. The in-app job handles both and needs no extra service.
+
+### 7.12 Request IDs, logging and security headers ([core/middleware.py](backend/app/core/middleware.py))
+One middleware wraps every request:
+- **Request ID:** reuses a safe incoming `X-Request-ID` or makes a random 12-character one, and returns it in the response. A user can report "request abc123 failed", and you grep the logs for it.
+- **Access log:** one line per API call: method, path, status, duration, request ID. **No emails, passwords or photos are logged** (privacy).
+- **Security headers:**
+  - `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `X-Frame-Options: DENY`, `Permissions-Policy`;
+  - `Strict-Transport-Security` in production (HTTPS only);
+  - **Content Security Policy:** scripts, styles, fonts and API calls may come **only from this site** (`'self'`), with no inline scripts, `object-src 'none'` and `frame-ancestors 'none'`. Even if an attacker injected HTML, the browser would refuse to load their script or send data elsewhere.
+  - `/docs` is excluded because FastAPI's docs page loads from a CDN.
+- **Fonts are self-hosted** (`@fontsource/*` packages bundled by Vite) instead of Google Fonts. The CSP can then stay strict, and no visitor IP addresses go to a third party, which matters for privacy law.
+
+### 7.13 Privacy by design ([pages/PrivacyPage.tsx](frontend/src/pages/PrivacyPage.tsx))
+The Privacy Notice reflects how the code actually behaves (an interviewer may check this):
+- **Data minimisation:** store a password *hash*, a token *hash* and an email *hash* for failed logins; log no personal data.
+- **Storage limitation:** the 5-day retention job.
+- **User rights:** see (History), download (buttons), delete (items or the whole account).
+- **Cookies:** a single strictly necessary session cookie plus a theme preference in localStorage. There are no analytics or trackers, so **no consent banner is needed** (ePrivacy rules exempt strictly necessary storage).
+- **Processors:** named (Render, Neon), with their region. Hugging Face only hosts the model file.
+- **Contact:** the developer's GitHub profile. For a real company this would be a privacy email address and a named controller.
+
 ---
 
 ## 8. Database design and concurrency
@@ -278,6 +356,7 @@ users ─┬─< credit_transactions      (ledger, append-only)
        ├── rate_limit_buckets        (user_id is the primary key)
        ├─< predictions               (index on user_id, created_at)
        └─< compositions
+login_attempts                       (email_hash + created_at; no foreign key: also for unknown emails)
 ```
 
 | Table | Key columns | Rules |
@@ -288,6 +367,7 @@ users ─┬─< credit_transactions      (ledger, append-only)
 | `rate_limit_buckets` | user_id (PK), tokens, updated_at | |
 | `predictions` | user_id, file paths, size, foreground_fraction, model_version | composite index `(user_id, created_at)` |
 | `compositions` | user_id, background_path, cutout_path, anchor_bottom | |
+| `login_attempts` | email_hash, created_at | index `(email_hash, created_at)` for the 15-minute count |
 
 **Why the composite index?** The history query is `WHERE user_id = ? ORDER BY created_at DESC`. An index on `(user_id, created_at)` serves both the filter and the sort.
 
@@ -317,10 +397,16 @@ users ─┬─< credit_transactions      (ledger, append-only)
 ## 9. Frontend in detail
 
 **Files** ([frontend/src](frontend/src))
-- `App.tsx` holds the state: user, mode, chosen files, result, dialogs, theme.
+- `App.tsx` holds app-wide state (who is signed in, theme, recharge dialog), handles API errors in one place, and picks the page.
+- `router.ts`: a tiny **hash router**. The page is chosen by the part after `#` (`#/`, `#/history`, `#/privacy`). Changing it never reloads the page, and back/forward work. No routing library is needed for three pages.
+- `pages/`:
+  - `CreatePage` (operations, upload, results);
+  - `HistoryPage` (tabs, cards, Load more, open/delete, delete account; a `Thumb` placeholder appears if an image file is gone);
+  - `PrivacyPage`.
 - `components/`:
-  - `AuthScreen` (form + validation);
-  - `Header` (credits, recharge, theme, logout);
+  - `AuthScreen` (form + validation + privacy line);
+  - `PasswordInput` (Show/Hide toggles `type="password"` ↔ `type="text"`; the button is `type="button"` so it doesn't submit the form);
+  - `Header` (nav, credits, recharge, theme, logout), `Footer` (privacy and source links);
   - `ImagePicker` (JPG/PNG ≤ 10 MB check);
   - `RechargeModal`;
   - `PredictionResult` (4 images + downloads);
@@ -465,8 +551,8 @@ The free server has **512 MB RAM and 0.1 CPU**. I measured inside the production
 
 ### Staying inside the free limits
 - **Render:** 750 instance-hours per month (one service running all month fits). It sleeps after 15 min without traffic. Don't use pinger services to keep it awake; just tell visitors about the cold start.
-- **Neon:** about 0.5 GB storage on the free plan. Each prediction row is under 1 KB, so that's thousands of jobs. Check with `db_admin.py stats` and wipe with `db_admin.py reset` if needed.
-- **Generated images:** live on Render's temporary disk and vanish on restart. That's accepted for a demo.
+- **Neon:** about 0.5 GB storage on the free plan. Each prediction row is under 1 KB, and the **5-day retention job** keeps only recent rows, so storage stays tiny. Check with `db_admin.py stats`, run `db_admin.py cleanup` by hand, or wipe with `db_admin.py reset`.
+- **Generated images:** live on Render's temporary disk. The cleanup job deletes them after 5 days, and a restart wipes them anyway.
 
 ### How I would deploy this on AWS (interview talking point)
 
@@ -507,6 +593,13 @@ Numbers follow my original issue list (it had no item 8).
 | – | Credits lost if inference crashed | Charged before running, no compensation | `refund()` on failure |
 | – | Couldn't deploy for free | CUDA image, 3 terminals, model file not in Git | One CPU Docker image serving API + frontend, ONNX model from Hugging Face, Render Blueprint, CI |
 | – | Hard to read code | Long one-line chains in `App.tsx` / `auth.py`; dead code | Split into components; removed capabilities endpoint, unused components, IP hashing, CORS, egg-info |
+| – | No way to see past work | History API existed, no page | History page with tabs, pagination, reopen, delete |
+| – | Password typed blind | Plain password input | Show/Hide toggle |
+| – | Data grew forever | No retention policy | 5-day cleanup job with advisory lock; `db_admin.py cleanup` |
+| – | No privacy notice; Google Fonts leaked visitor IPs | Not built | Privacy Notice page, self-hosted fonts, strict CSP |
+| – | Unlimited password guessing | No login limit | 5 failed logins per 15 min per email |
+| – | Users couldn't delete their data | No endpoint | Delete items; delete account with password (CASCADE) |
+| – | Hard to trace a failing request | No request IDs | Request-ID + access-log middleware |
 
 ---
 
@@ -557,7 +650,8 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 - **Images on the free tier are temporary;** in production, use S3 with presigned URLs.
 - **`/media` URLs** are unguessable but not access-checked; S3 presigned URLs fix this too.
 - **Sign-up abuse:** anyone can create many accounts for free credits. Add email verification, CAPTCHA, or a per-IP sign-up limit.
-- **Login has no rate limit:** PBKDF2 costs ~0.1 s of CPU per attempt (~1 s on the free 0.1 CPU), so login spam could slow the server. Add a per-IP/per-email login limiter.
+- **Login limit is per email only:** add a per-IP limit against password spraying.
+- **Offset pagination** gets slow for very deep pages; switch to keyset pagination at scale.
 - **No migrations:** add Alembic before real users.
 - **Realism:** no perspective or light-direction matching.
 - **Accessibility:** the editor needs a keyboard way to move the person.
@@ -604,6 +698,18 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 29. *What are the free tier's downsides?* About 1 minute cold start, 0.1 CPU (several seconds per image), temporary disk.
 30. *How did you make it fit in 512 MB?* Measured, then fixed the biggest costs: shrink uploads to ≤ 1600 px (955 → 463 MiB), then switch serving to ONNX Runtime (→ 378 MiB).
 
+**Production-readiness (added later)**
+31. *How do you keep the free database from filling up?* A retention job deletes uploads, results and history after 5 days, expired sessions, 1-day-old failed-login rows and 30-day-old ledger rows. It runs at startup and hourly.
+32. *Why hourly instead of every 5 days?* The free server sleeps when idle, so a 5-day timer might never fire. Running at every wake-up and hourly enforces "max 5 days" reliably.
+33. *What if you run two app instances?* `pg_try_advisory_xact_lock` lets only one run the cleanup; the other skips. The lock is released at COMMIT.
+34. *How do you stop password guessing?* 5 failures per email per 15 minutes, then 429, checked before the slow hash. Emails are stored hashed in that table.
+35. *How does account deletion work?* Password re-check, then one `DELETE FROM users`; `ON DELETE CASCADE` removes everything else in the same transaction, then files are deleted after the commit.
+36. *Why delete files after the commit and not before?* If the commit failed after deleting files, the row would point to missing files. The other order can only leave an orphan folder, which the cleanup sweeps up.
+37. *What does your Content Security Policy do?* Lets the browser load scripts, styles, fonts and API calls only from our own origin, blocks plugins and framing. Self-hosting fonts made `'self'` possible.
+38. *How would you debug a user's failed request in production?* Ask for the `X-Request-ID` from the response (or the UI), then search the logs for it: one line with method, path, status and duration.
+39. *Offset vs keyset pagination?* Offset is simple and supports "page N" but scans skipped rows. Keyset (`WHERE created_at < last_seen`) stays fast at any depth but only supports next/previous.
+40. *What's in your privacy notice and why no cookie banner?* What I collect, why, retention, processors, rights, cookies. Only one strictly necessary cookie and no trackers, which are exempt from consent.
+
 ---
 
 ## 19. Command cheat sheet
@@ -636,6 +742,7 @@ python scripts/export_onnx.py            # model.pth -> model.onnx
 
 # database (owner only)
 python scripts/db_admin.py stats
+python scripts/db_admin.py cleanup       # 5-day retention job, now
 python scripts/db_admin.py reset
 SEGMENTATION_DATABASE_URL='<neon url>' python scripts/db_admin.py stats
 

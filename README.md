@@ -12,8 +12,11 @@ A U-Net trained from scratch to separate people from the background, served as a
 
 - **Person segmentation** (1 credit): binary mask, transparent cutout with soft edges, and a tinted overlay.
 - **Combine with another image** (2 credits): the person is cropped, colour-matched to the new background, and placed in a canvas editor. Drag to move, scroll or use the slider to resize, mirror, and download a PNG. Half-body photos stay glued to the bottom edge; full-body ones get a soft contact shadow.
+- **History**: a separate page lists your past cutouts and compositions (paginated). Open a result again, reopen a composition in the editor, or delete it.
 - **Accounts and credits**: 30 free credits on sign-up, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
-- Light and dark theme.
+- **Privacy by design**: a full [Privacy Notice](frontend/src/pages/PrivacyPage.tsx) page. Uploads and results are **deleted automatically after 5 days**. Self-service account deletion. One strictly necessary cookie, no trackers, self-hosted fonts.
+- **Security**: salted password hashing, hashed session tokens, HTTP-only cookies, a limit of 5 failed sign-ins per 15 minutes, per-user access checks, a strict Content Security Policy and security headers, and a request ID on every response.
+- Light and dark theme, and a show/hide password toggle.
 
 ## Model results
 
@@ -34,8 +37,9 @@ Browser (React + TypeScript)
    ▼
 FastAPI ──► rate limit (token bucket) ──► credits ──► U-Net on ONNX Runtime ──► realism steps
    │                                                                        (crop, colour match)
-   ├── PostgreSQL: users, sessions, credit ledger, rate-limit buckets, history
-   └── uploads/: generated images, served at /media/...
+   ├── PostgreSQL: users, sessions, credit ledger, rate-limit buckets, login attempts, history
+   ├── uploads/: generated images, served at /media/...
+   └── retention job (startup + hourly): deletes data older than 5 days
 ```
 
 Training happens offline in PyTorch on a GPU (`src/segmentation`, `scripts/`). The best checkpoint is exported to `model.onnx`, and the web server only needs that file.
@@ -100,6 +104,7 @@ There is no admin web page. These commands need the database connection string, 
 
 ```bash
 python scripts/db_admin.py stats     # size and row counts (keep an eye on the free-tier storage limit)
+python scripts/db_admin.py cleanup   # run the 5-day retention job now (it also runs automatically every hour)
 python scripts/db_admin.py reset     # deletes ALL users and history; asks you to type the database name
 
 # production: pass the Neon connection string for this one command
@@ -112,24 +117,27 @@ SEGMENTATION_DATABASE_URL='postgresql+psycopg://…neon.tech/neondb?sslmode=requ
 | --- | --- | --- |
 | POST | `/api/auth/register` · `/api/auth/login` | JSON `{email, password}`; sets an HTTP-only session cookie |
 | POST | `/api/auth/logout` | 204 |
-| GET | `/api/auth/me` | current email and credits |
+| GET | `/api/auth/me` | current email, credits and retention period |
 | POST | `/api/auth/recharge` | +30 credits, only when below 2 |
+| DELETE | `/api/auth/account` | JSON `{password}`; deletes the account and all its data |
 | POST | `/api/predictions` | multipart `image` (JPG/PNG ≤ 10 MB); 1 credit |
-| GET | `/api/predictions` · `/api/predictions/{id}` | your history only |
+| GET | `/api/predictions?limit=&offset=` · `/api/predictions/{id}` | your history only, newest first |
+| DELETE | `/api/predictions/{id}` | removes the row and its files |
 | POST | `/api/compositions` | multipart `person_image` + `background_image`; 2 credits |
-| GET | `/api/health` | model and database status |
+| GET / DELETE | `/api/compositions`, `/api/compositions/{id}` | same pattern as predictions |
+| GET | `/api/health` | model and database status (503 when degraded) |
 
-Errors: 401 (not signed in), 402 (not enough credits), 415 (not JPG/PNG), 429 (rate limited, with `Retry-After`).
+Errors: 401 (not signed in), 402 (not enough credits), 403 (wrong password on account deletion), 404 (not found or not yours), 415 (not JPG/PNG), 429 (rate limited or too many failed sign-ins, with `Retry-After`). Interactive docs: `/docs`.
 
 ## Project structure
 
 ```text
 backend/app/
   api/          HTTP routes (auth, predictions, compositions, health)
-  services/     auth, credits, rate_limit, jobs, inference (ONNX), realism, storage
+  services/     auth, credits, rate_limit, jobs, inference (ONNX), realism, storage, retention
   db/           SQLAlchemy models and session
-  core/         settings from environment variables
-frontend/src/   React app: App.tsx + components/ (AuthScreen, Header, ImagePicker, Composer, …)
+  core/         settings from environment variables, request middleware (request ID, logs, security headers)
+frontend/src/   React app: App.tsx + router.ts, pages/ (Create, History, Privacy), components/ (Composer, …)
 src/segmentation/  U-Net, dataset, training loop, checkpoint contract, ONNX export
 scripts/        prepare_data, train, verify_checkpoint, evaluate_test_split, export_onnx, db_admin
 tests/          unit tests + API tests against real PostgreSQL
@@ -144,7 +152,7 @@ Dockerfile · docker-compose.yml · render.yaml · .github/workflows/ci.yml
 
 - The model works at 256×256, so fine details like hair are approximate. It sometimes includes bright background patches, such as sky near the horizon.
 - The realism steps are classic image processing. They do not fix perspective or the direction of light.
-- On the free plan, generated images are stored on the server's temporary disk and disappear when it restarts. Accounts, credits and history are kept in PostgreSQL.
+- On the free plan, generated images are stored on the server's temporary disk and disappear when it restarts. History entries are kept in PostgreSQL until the 5-day retention job deletes them.
 
 ## Dataset
 
