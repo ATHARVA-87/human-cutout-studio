@@ -39,6 +39,7 @@ This is my personal revision guide. It assumes I remember nothing about the proj
   - One active session per user is enforced by a UNIQUE constraint.
   - Inference runs in a worker thread so the async server stays responsive.
 - **Frontend editor:** drag, wheel zoom and mirroring, plus some classic image processing so the pasted person fits the scene.
+- **Benchmark (§5.7):** I compared my model with a fine-tuned pretrained U-Net, DeepLabV3 and SAM on the same test images. The pretrained encoder wins (+4.3 Dice points). Mine beats SAM and DeepLabV3 at a fraction of the cost. The results are on the site's Model page.
 
 **5 minutes.** Walk through §6 (one request from click to pixels) and mention:
 - the memory story in §11 (955 → 463 → 378 MiB);
@@ -192,6 +193,57 @@ After all decisions were final, I ran the 268 test images once: **global Dice 0.
 - I write the preprocessing settings and model version into the ONNX file's **metadata**, so the server reads them from the model file itself.
 - The script feeds the same random input to PyTorch and ONNX Runtime and fails if they differ by more than 1e-3. The real difference is ~1e-5.
 - The exporter prints a "TracerWarning" about an `if` in `Up.forward`. That `if` only matters for odd input sizes, and the server always feeds exactly 256×256, so it is safe; the warning is silenced with a comment explaining why.
+
+### 5.7 How it compares: the benchmark ([scripts/benchmark_models.py](scripts/benchmark_models.py), [pages/ModelPage.tsx](frontend/src/pages/ModelPage.tsx))
+**Why I did it:** "a U-Net from scratch" sounds basic. The engineering answer is to measure it against the obvious alternatives and say what each one costs.
+
+**The contenders** (same 268 untouched test images, same masks):
+
+| Model | What it is | Training |
+| --- | --- | --- |
+| Mine | 4-level U-Net, 7.8 M parameters | from scratch on 2,133 images |
+| Pretrained ResNet-34 U-Net | the same U-Net idea, but the encoder is ResNet-34 pretrained on ImageNet ([scripts/train_pretrained_baseline.py](scripts/train_pretrained_baseline.py)) | fine-tuned on **exactly** my training images, augmentation, loss and epochs, so the only difference is pretraining |
+| DeepLabV3-MobileNetV3 | torchvision model trained on COCO; I use its "person" class | none (off the shelf) |
+| Detector + SAM | Faster R-CNN finds people → Segment Anything (ViT-B) cuts them out | none |
+| SAM + true box | SAM given the correct box from the answer key | none; an **upper bound**, not a real option |
+
+**Metrics:**
+- **Dice / IoU:** overlap with the true mask. I report the mean per image, which is stricter than the global Dice in §5.4. My model scores 0.912 per image and 0.926 global; the global number weights big people more.
+- **Boundary F1:** the share of predicted edge pixels within 2 px of the true outline (and the reverse), combined like precision and recall. Dice hides bad edges because the inside of a person is easy; this metric doesn't.
+- **Failure rate:** share of images with Dice < 0.8.
+- **CPU ms per image and RAM:** each model runs alone in a fresh process, 1 CPU thread, like the free server.
+
+**Results:**
+
+| Model | Dice | Boundary F1 | CPU / image | Model RAM | Server peak (est.) | Fits 512 MB |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Mine** | 0.912 | 0.736 | 166 ms | 178 MB | 378 MB | yes |
+| Pretrained ResNet-34 U-Net | **0.955** | **0.855** | **109 ms** | 244 MB | 444 MB | yes |
+| DeepLabV3 (off the shelf) | 0.909 | 0.559 | 232 ms | 290 MB | 490 MB | yes |
+| Detector + SAM | 0.884 | 0.690 | 10.7 s | 2,446 MB | 2.6 GB | no |
+| SAM + true box | 0.915 | 0.746 | 10.4 s | 2,337 MB | 2.5 GB | no |
+
+**What I conclude:**
+1. **Transfer learning wins.** Same data, same training: the pretrained encoder adds 4.3 Dice points and 0.12 boundary F1. ImageNet already taught it edges, textures and shapes, so my 2,133 images only had to teach "which of these is a person".
+2. **It's even faster,** because ResNet's first layers shrink the image by 4× right away. My U-Net does its first convolutions at full 256×256 resolution with 32 channels, which is the most expensive part.
+3. **It still fits the free server** (estimated 444 of 512 MB), so it would be my next production model. It costs a 3× larger weights file (98 vs 31 MB) and a thinner memory margin.
+4. **A general model loses to a specialist.** SAM is far more general, but on this one task it is less accurate than either U-Net, about 64× slower on the CPU, and 14× bigger in memory. It also needs a prompt, and the detector's mistakes become SAM's mistakes (15% failure rate).
+5. **Training on this data matters for edges.** DeepLabV3 has about the same Dice as mine, but much worse outlines (0.559 vs 0.736): it was trained on COCO's rough polygon masks at a different resolution.
+
+**How the measurement was kept fair (and what I got wrong first):**
+- **Same runtime for the two U-Nets.** At first I timed mine in ONNX Runtime and the ResNet in PyTorch. That compares runtimes, not models. Now the baseline is exported to ONNX as well (checked against PyTorch: max difference 8e-6).
+- **Memory bug:** my first run said my model used 643 MB, more than the whole live server (378 MB). The cause: `getrusage(...).ru_maxrss` on Linux **carries over from the parent process** into a child started with fork + exec. So every child "inherited" the parent's peak, which by then held CUDA and other models. I switched to `VmHWM` in `/proc/self/status`, which belongs only to the new process. The lesson: if a number contradicts something you measured another way, the measurement is wrong until proven otherwise.
+- **Model RAM** = peak minus memory just before the model loaded. PyTorch's own import is not counted for DeepLab and SAM, which favours them. The server estimate = the measured live peak (378 MB) − my model's RAM (178 MB) + each model's RAM.
+- **Honest limits:** one training run per model (no error bars), and 256-pixel inputs, smaller than what SAM and DeepLabV3 usually see.
+
+**Re-running it:** `pip install -e '.[benchmark]'`, then `python scripts/train_pretrained_baseline.py` (needs a GPU; 20 epochs), then `python scripts/benchmark_models.py`. It writes `frontend/src/data/benchmark.json`, which the Model page imports at build time, so the charts always show the latest run.
+
+**The Model page** (`#/model`, public): three takeaway tiles computed from the JSON, bar charts for Dice and boundary F1, a quality-vs-speed scatter (log scale, because SAM is 100× slower), memory against the 512 MB line, a strip plot of every image's Dice, the full table, and the method. Chart rules I followed:
+- my model in orange and the others in grey (one highlight, not five colours), with the palette checked for contrast and colour-blind separation;
+- one axis per chart;
+- tooltips on hover **and** keyboard focus;
+- a table for screen readers;
+- charts drawn at their real width, so text stays readable on a phone.
 
 ---
 
@@ -787,10 +839,10 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 
 - **Model quality:** 256×256 input loses fine hair detail, and bright sky patches near the horizon are sometimes labelled as person. Next steps:
   - train at 512 with more augmentation (scale, colour jitter);
-  - try a pretrained encoder (transfer learning) and compare.
+  - **switch to the pretrained ResNet-34 U-Net**: the benchmark (§5.7) shows it is better and faster, and it fits the free server.
+- **Benchmark:** one run per model; repeat with several seeds to get error bars.
 - **Images on the free tier are temporary;** in production, use S3 with presigned URLs.
-- **`/media` URLs** are unguessable but not access-checked; S3 presigned URLs fix this too.
-- **Sign-up abuse:** anyone can create many accounts for free credits. Add email verification, CAPTCHA, or a per-IP sign-up limit.
+- **Sign-up abuse:** email confirmation and a per-IP sign-up limit are in place; a CAPTCHA would be the next step.
 - **Offset pagination** gets slow for very deep pages; switch to keyset pagination at scale.
 - **Single-instance inference:** at scale, move inference to a job queue (SQS/Celery) with worker containers.
 - **Realism:** no perspective or light-direction matching.
@@ -860,6 +912,11 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 50. *Why can't you use SMTP on Render, and what did you do?* The free plan blocks SMTP ports, so production uses Brevo's HTTPS API. The code has interchangeable backends (console, SMTP for the local Mailpit inbox, Brevo).
 51. *How can someone try the app without an email?* Guest mode: a temporary, already-confirmed account on the reserved `.invalid` domain, 10 credits, max 5 per IP per day, deleted on logout or after 24 hours by the cleanup job.
 52. *How do you make sure welcome credits are given only once?* One conditional `UPDATE … WHERE email_verified = false` sets the flag and adds the credits; a second attempt matches 0 rows.
+53. *Isn't a U-Net from scratch too basic?* As a learning step it shows the whole loop. Then I measured it against the alternatives (§5.7): a fine-tuned pretrained ResNet-34 U-Net is 4.3 Dice points better and faster, so it would be my production choice. Mine still beats SAM and DeepLabV3 on this task at a fraction of their cost.
+54. *Why not just use SAM?* On this task it was less accurate (0.884 Dice with a detector, 0.915 even with the true box), took about 10 seconds per image on one CPU thread instead of 0.17 s, and needed about 2.4 GB of RAM. The free server has 512 MB. SAM also needs a prompt (a box or a point), so a detector has to come first.
+55. *How did you make the comparison fair?* The pretrained model got the same images, augmentation, loss and epochs as mine. Every model was scored on the same untouched test images and masks. Both U-Nets were timed in ONNX Runtime on one thread, each in a fresh process. I reported boundary F1 as well as Dice, because Dice hides bad edges.
+56. *Why is the pretrained model faster when it has 3× the parameters?* Speed depends on computation per pixel, not on the parameter count. ResNet's stem shrinks the image 4× before the heavy layers. My U-Net runs its first 32-channel convolutions at full resolution, which is the most expensive part.
+57. *What went wrong while measuring?* Memory looked impossible: 643 MB for a model that runs on a 512 MB server. On Linux, `ru_maxrss` survives fork + exec, so the child process reported the parent's peak. I switched to `/proc/self/status` `VmHWM`. When a number contradicts another measurement, distrust the measurement first.
 
 ---
 
@@ -890,6 +947,11 @@ python scripts/train.py
 python scripts/verify_checkpoint.py
 python scripts/evaluate_test_split.py
 python scripts/export_onnx.py            # model.pth -> model.onnx
+
+# benchmark (§5.7)
+python -m pip install -e '.[benchmark]'
+python scripts/train_pretrained_baseline.py   # the ResNet-34 U-Net baseline
+python scripts/benchmark_models.py            # writes frontend/src/data/benchmark.json
 
 # database (owner only)
 python scripts/db_admin.py stats

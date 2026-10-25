@@ -6,6 +6,7 @@ import { Header } from "./components/Header";
 import { RechargeModal } from "./components/RechargeModal";
 import { CreatePage } from "./pages/CreatePage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ModelPage } from "./pages/ModelPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { PrivacyPage } from "./pages/PrivacyPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
@@ -105,10 +106,15 @@ export default function App() {
   // Which page is visible. The Create page stays MOUNTED (just hidden) while you look at History or
   // Privacy, so chosen photos, results and the editor keep their state when you come back.
   // It is unmounted (and its state cleared) only when you sign out.
-  const publicPage = route === "privacy" || route === "forgot" || route === "reset" || route === "verify"; // work signed out too
+  const publicPage = route === "model" || route === "privacy" || route === "forgot" || route === "reset" || route === "verify"; // work signed out too
   const showAuth = !checkingSession && !user && !publicPage;
   const pages = (
     <>
+      {route === "model" && (
+        <div className="page">
+          <ModelPage />
+        </div>
+      )}
       {route === "privacy" && (
         <div className="page">
           <PrivacyPage />

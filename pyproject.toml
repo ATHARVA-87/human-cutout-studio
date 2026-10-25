@@ -25,6 +25,8 @@ dependencies = [
 [project.optional-dependencies]
 # Training, evaluation and ONNX export (scripts/train.py, evaluate_test_split.py, export_onnx.py).
 train = ["torch>=2.5", "tqdm>=4.66", "onnx>=1.17"]
+# Model comparison (scripts/train_pretrained_baseline.py, scripts/benchmark_models.py). Not needed by the app.
+benchmark = ["torch>=2.5", "torchvision>=0.20", "tqdm>=4.66", "onnx>=1.17", "scipy>=1.11", "segmentation-models-pytorch>=0.5", "transformers>=4.45"]
 # Tests and code checks. PyTorch is installed separately (CPU build in CI; your own build locally).
 dev = ["httpx>=0.27", "pytest>=8.0", "tqdm>=4.66", "onnx>=1.17", "ruff>=0.6", "mypy>=1.11"]
 

@@ -18,6 +18,7 @@ A U-Net trained from scratch to separate people from the background, served as a
 - **Private images**: every image is served only to its signed-in owner. Anyone else gets 404, even with the exact link.
 - **Privacy by design**: a full [privacy page](frontend/src/pages/PrivacyPage.tsx) written from the user's side. Uploads and results are **deleted automatically after 5 days**. Self-service account deletion. One strictly necessary cookie, no trackers, self-hosted fonts.
 - **Security**: salted password hashing, hashed session tokens, HTTP-only cookies, sign-in limits per account and per network (blocks password guessing and spraying), a sign-up limit per network, per-user access checks, a strict Content Security Policy and security headers, a non-root container, and a request ID on every response.
+- **Model comparison page**: interactive charts comparing the model with SAM, DeepLabV3 and a pretrained U-Net (quality, edges, speed, memory, per-image consistency).
 - **Design**: a cutting-mat workspace, the editor's "marching ants" selection and the transparency checkerboard as the visual language. Light and dark theme, a show/hide password toggle, drag-and-drop uploads, and full keyboard support including the editor.
 
 ## Model results
@@ -30,6 +31,27 @@ A U-Net trained from scratch to separate people from the background, served as a
 | Best validation Dice | **0.9229** (epoch 38 of 40) |
 | Test Dice | **0.9259** on the 268 untouched test images, measured once |
 | Serving | Exported to ONNX (31 MB), matches PyTorch to within 1e-5 |
+
+### How it compares
+
+I benchmarked the model against a fine-tuned pretrained network, an off-the-shelf segmenter and Segment Anything (SAM), all on the same 268 test images. **Interactive charts: [the Model page](https://human-cutout-n6b5.onrender.com/#/model).**
+
+| Model | Dice | Boundary F1 | CPU / image | Server peak (est.) | Fits 512 MB |
+| --- | --- | --- | --- | --- | --- |
+| **Mine: U-Net from scratch** | 0.912 | 0.736 | 166 ms | 378 MB | yes |
+| U-Net + ImageNet ResNet-34, fine-tuned on the same data | **0.955** | **0.855** | **109 ms** | 444 MB | yes |
+| DeepLabV3-MobileNetV3 (COCO), off the shelf | 0.909 | 0.559 | 232 ms | 490 MB | yes |
+| Person detector + SAM ViT-B | 0.884 | 0.690 | 10.7 s | 2.6 GB | no |
+| SAM ViT-B given the true box (upper bound) | 0.915 | 0.746 | 10.4 s | 2.5 GB | no |
+
+<sub>Dice = mean per image. Boundary F1 = share of outline pixels within 2 px of the true edge. CPU = median on 1 thread, each model alone in a fresh process; both U-Nets run on ONNX Runtime. Server peak = the live server's measured 378 MB minus my model's RAM, plus each model's own RAM.</sub>
+
+What it shows:
+- **Transfer learning wins.** With the same images, loss and epochs, the pretrained encoder adds 4.3 Dice points and is also faster. It still fits the free server, so it is the next production model.
+- **A small specialist beats a giant generalist on one narrow task.** Mine is more accurate than detector + SAM, 64× faster and 14× lighter in memory.
+- **Edges need in-domain training.** DeepLabV3 matches my Dice but has much rougher outlines.
+
+Reproduce with `pip install -e '.[benchmark]'`, `python scripts/train_pretrained_baseline.py`, then `python scripts/benchmark_models.py`. Method and caveats are in [WALKTHROUGH.md §5.7](WALKTHROUGH.md#57-how-it-compares-the-benchmark-scriptsbenchmark_modelspy-pagesmodelpagetsx).
 
 ## How it works
 
@@ -161,9 +183,11 @@ backend/app/
   services/     auth, credits, rate_limit, jobs, inference (ONNX), realism, storage, retention
   db/           SQLAlchemy models and session; migrations/ holds the Alembic migration scripts
   core/         settings from environment variables, request middleware (request ID, logs, security headers)
-frontend/src/   React app: App.tsx + router.ts, pages/ (Create, History, Privacy), components/ (Composer, …)
+frontend/src/   React app: App.tsx + router.ts, pages/ (Create, History, Model, Privacy), components/ (Composer, …),
+                data/benchmark.json (written by the benchmark, drawn by the Model page)
 src/segmentation/  U-Net, dataset, training loop, checkpoint contract, ONNX export
-scripts/        prepare_data, train, verify_checkpoint, evaluate_test_split, export_onnx, db_admin
+scripts/        prepare_data, train, verify_checkpoint, evaluate_test_split, export_onnx, db_admin,
+                train_pretrained_baseline + benchmark_models (the comparison)
 tests/          unit tests + API tests against real PostgreSQL
 Dockerfile · docker-compose.yml · render.yaml · .github/workflows/ci.yml · alembic.ini · requirements*.lock
 ```

@@ -42,6 +42,9 @@ export function Header({ user, route, dark, busy = false, onToggleTheme, onRecha
             <a href={href("history")} aria-current={route === "history" ? "page" : undefined}>
               History
             </a>
+            <a href={href("model")} aria-current={route === "model" ? "page" : undefined}>
+              Model
+            </a>
             <span
               className="nav-underline"
               aria-hidden="true"

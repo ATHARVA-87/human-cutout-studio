@@ -80,6 +80,9 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
           Upload a photo and get the person on a transparent background, then drop them into any other picture. Confirm your email to get 30 free
           credits, or try it without an account.
         </p>
+        <p className="intro-link">
+          <a href={href("model")}>See how my from-scratch model compares with SAM and a pretrained network</a>
+        </p>
       </div>
 
       <form className="panel auth-form" onSubmit={onSubmit} noValidate>

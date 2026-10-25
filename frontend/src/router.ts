@@ -8,9 +8,9 @@ import { useEffect, useState } from "react";
  * Email links look like /#/reset?token=...: everything after "#" (including the token) stays in the
  * browser and is never sent to the server in the request, so tokens don't end up in server logs.
  */
-export type Route = "create" | "history" | "privacy" | "forgot" | "reset" | "verify";
+export type Route = "create" | "history" | "model" | "privacy" | "forgot" | "reset" | "verify";
 
-const ROUTES: Route[] = ["history", "privacy", "forgot", "reset", "verify"];
+const ROUTES: Route[] = ["history", "model", "privacy", "forgot", "reset", "verify"];
 
 function parse(hash: string): Route {
   const path = hash.replace(/^#\//, "").split("?")[0];
