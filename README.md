@@ -4,7 +4,7 @@
 
 A U-Net trained from scratch to separate people from the background, served as a full-stack web app. Sign up, cut a person out of a photo, or place them into another picture with a drag-and-resize editor.
 
-**Live demo:** _link added after deployment_. It runs on a free server that sleeps when idle, so the first visit can take about a minute to wake up.
+**Live demo: https://human-cutout-n6b5.onrender.com** (free server: if it has been idle, the first visit takes about a minute to wake up; the confirmation email may land in spam).
 
 ![Composition editor](docs/composition.png)
 

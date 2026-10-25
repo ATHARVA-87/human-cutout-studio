@@ -659,6 +659,9 @@ The free server has **512 MB RAM and 0.1 CPU**. I measured inside the production
 - **Render:** 750 instance-hours per month (one service running all month fits). It sleeps after 15 min without traffic. Don't use pinger services to keep it awake; just tell visitors about the cold start.
 - **Neon:** about 0.5 GB storage on the free plan. Each prediction row is under 1 KB, and the **5-day retention job** keeps only recent rows, so storage stays tiny. Check with `db_admin.py stats`, run `db_admin.py cleanup` by hand, or wipe with `db_admin.py reset`.
 - **Generated images:** live on Render's temporary disk. The cleanup job deletes them after 5 days, and a restart wipes them anyway.
+- **Brevo API key:** it has no fixed expiry, but Brevo expires it after **90 days without any email sent**. If confirmation emails stop arriving and the Render log shows `sending email failed`, create a new key (Restricted, Transactional email: All) and replace `SEGMENTATION_BREVO_API_KEY` under **Render → human-cutout → Environment**.
+- **Slow first start:** on the free plan's 0.1 CPU, a fresh deploy once took about 10 minutes to start, and Render's port scan timed out ("no open ports detected"). Redeploying the cached image went Live straight away. If it happens again, redeploy.
+- **Live site:** https://human-cutout-n6b5.onrender.com (region Singapore; the `gcp-us-west1` hostname is only Render's entry point).
 
 ### How I would deploy this on AWS (interview talking point)
 
