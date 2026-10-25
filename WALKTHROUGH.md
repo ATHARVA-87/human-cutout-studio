@@ -27,7 +27,32 @@ This is my personal revision guide. It assumes I remember nothing about the proj
 
 ## 1. The project in 30 seconds, 2 minutes, 5 minutes
 
-**30 seconds.** I trained a U-Net from scratch to find people in photos (test Dice 0.926), then built a full-stack app around it. Users sign up, get credits, cut a person out of a photo, or drop them into another picture with a canvas editor. The backend is FastAPI + PostgreSQL, the frontend is React + TypeScript. It is deployed for free with Docker, GitHub Actions CI and Render.
+### 1.0 Say it out loud: the short interview answer (about 60 seconds)
+Use this when the interviewer says "tell me about this project". Speak it, don't read it.
+
+> "Human Cutout is a web app that cuts a person out of any photo and lets you place them into another picture.
+>
+> On the ML side, I trained a U-Net from scratch in PyTorch on about 2,700 labelled photos. It reaches a Dice score of 0.93 on a test set I only looked at once. Then I benchmarked it against a fine-tuned pretrained network, DeepLabV3 and Segment Anything. The pretrained encoder was 4 points better, so that's my next production model. Mine still beat SAM while being 64 times faster and small enough for a free 512 MB server.
+>
+> Around the model I built a full product: FastAPI and PostgreSQL on the backend, React and TypeScript on the frontend. It has accounts with email confirmation and password reset, a credit system that can't be double-spent, rate limiting, private images, and a guest mode.
+>
+> It's deployed for free with Docker on Render, with a Neon database and GitHub Actions CI. Render only deploys when the tests pass.
+>
+> The part I'm proudest of is making it production-correct, not just working. Things like row locks for the credits, measuring memory to make the model fit the server, and catching my own measurement mistakes in the benchmark."
+
+**Then stop and let them choose.** Typical follow-ups and where the answer is:
+
+| They ask | Short answer | Details |
+| --- | --- | --- |
+| "Why from scratch?" | To learn the whole loop. Then I measured it, and the pretrained model wins. | §5.7, Q53 |
+| "How do credits stay correct with two tabs?" | One conditional `UPDATE … WHERE credits >= cost`. The database decides, not the Python code. | §7.4 |
+| "How did you fit 512 MB?" | I measured it, shrank uploads to 1,600 px, and switched to ONNX Runtime: 955 → 378 MiB. | §11 |
+| "What was hard?" | Pick two from §15, e.g. the memory measurement bug and the deploy timeout. | §15 |
+| "What would you do next?" | Swap in the pretrained model, S3 for images, a job queue for inference. | §17 |
+
+### 1.1 Written pitches
+
+**30 seconds.** I trained a U-Net from scratch to find people in photos (test Dice 0.926), benchmarked it against SAM and a pretrained network, then built a full-stack app around it. Users sign up, get credits, cut a person out of a photo, or drop them into another picture with a canvas editor. The backend is FastAPI + PostgreSQL, the frontend is React + TypeScript. It is deployed for free with Docker, GitHub Actions CI and Render.
 
 **2 minutes.** Add these points:
 - **Data:** 2,667 image/mask pairs, resized to 256×256, split 80/10/10 with a fixed seed.
@@ -794,22 +819,59 @@ Numbers follow my original issue list (it had no item 8).
 
 ## 15. Problems I hit and how I solved them
 
-| Problem | Resolution |
-| --- | --- |
-| Source images have many different sizes | Validate pairs, then resize image (bilinear) and mask (nearest) the same way |
-| `scripts/train.py` couldn't import `segmentation` | Scripts add `src/` to `sys.path`; `pip install -e .` also works |
-| Docker permission denied | Add my user to the `docker` group and start a new login session |
-| Vite crashed with `ENOSPC` (Linux file-watcher limit) | `VITE_USE_POLLING=true npm run dev` |
-| 12 MP photos needed ~1 GB RAM | Shrink uploads to ≤ 1600 px (JPEG `draft()` decodes at reduced size) |
-| PyTorch too heavy for 512 MB | Export to ONNX, serve with ONNX Runtime (§11) |
-| Installing `onnx` broke `wandb` in my conda env (protobuf version clash) | Use `onnx==1.17` with `protobuf==4.25.8`, which satisfies both |
-| My first fix stored `user.credits = new_value` after commit | That marks the row dirty, so a later commit could overwrite a parallel charge. Use `session.expire` instead |
-| Pillow's LAB a/b values looked wrong | They are signed bytes stored as unsigned; unwrap values above 127 |
-| `git rm -r` of a folder was blocked by my tool's safety check | Removed the two tracked files individually; git history keeps them anyway |
-| After switching the container to a non-root user, uploads failed locally | The old Docker volume was owned by root; `docker compose run --rm --user root --entrypoint "" app chown -R app:app /app/uploads` fixed it (new volumes and Render are fine) |
-| PyPI timed out while generating lock files | Retried with `--pip-args "--timeout 90 --retries 5"` |
-| Render's free plan blocks SMTP ports | Production email goes over Brevo's HTTPS API; SMTP only for the local Mailpit inbox |
-| My local tests hit my own "3 sign-ups per IP" limit | Raised it only in `docker-compose.yml` for local testing; production keeps 3 |
+Interviewers love "tell me about a problem you solved". Each entry says what went wrong, **why**, the fix, and the lesson. Pick the ones marked ★ first: they have the best stories.
+
+### 15.1 Machine learning and measurement
+
+| Problem | Why it happened | Fix | Lesson |
+| --- | --- | --- | --- |
+| Source images had many different sizes | Raw dataset from many cameras | Validate each image/mask pair, then resize the image with bilinear and the mask with nearest-neighbour, identically | Never interpolate a label mask; it invents in-between classes |
+| ★ The benchmark said my model needed 643 MB, more than the whole live server (378 MB) | On Linux, `getrusage().ru_maxrss` **carries over from the parent** through fork + exec, so each child reported the parent's peak (CUDA + earlier models) | Read `VmHWM` from `/proc/self/status`, which belongs to the new process only. Model RAM = peak − memory before loading. | If a number contradicts another measurement, suspect the measurement first |
+| ★ The first speed comparison was unfair | Mine ran on ONNX Runtime, the pretrained one on PyTorch: that compares runtimes, not models | Export the baseline to ONNX too (checked against PyTorch: 8e-6 difference) and time both on 1 thread in fresh processes | Change one thing at a time when comparing |
+| ★ My model lost to the pretrained one | Pretraining on ImageNet already teaches edges and shapes; 2,133 images can't | Reported it honestly on the site and README; it's my next production model | An honest negative result with a reason is a stronger story than a rigged win |
+| Pillow's LAB a/b colour values looked wrong | They are signed bytes stored as unsigned | Unwrap values above 127 | Check the data format before the maths |
+| Installing `onnx` broke `wandb` (protobuf clash) | Two packages wanted different protobuf versions | `onnx==1.17` + `protobuf==4.25.8` satisfies both | Pin versions; lock files (§7.12b) |
+
+### 15.2 Backend and database
+
+| Problem | Why it happened | Fix | Lesson |
+| --- | --- | --- | --- |
+| ★ Two tabs could spend the same credit | Read credits in Python, then write: a race between two requests | One conditional `UPDATE users SET credits = credits - :cost WHERE id = :id AND credits >= :cost`; 0 rows changed means "not enough" | Let the database enforce invariants (plus a `CHECK (credits >= 0)`) |
+| My first fix set `user.credits = new_value` after the commit | That marks the row dirty, so a later commit could overwrite a parallel charge | `session.expire(user)` so the next read reloads it | ORMs hide writes; know when they flush |
+| The rate limiter had a race | Read the bucket, then update it without a lock | `SELECT … FOR UPDATE` row lock, so the refill and spend happen as one step | Read-modify-write needs a lock or a conditional update |
+| The server froze during inference | The model ran inside the async event loop and blocked every request | `run_in_threadpool` plus a lock around the model | Async ≠ parallel: CPU work must leave the event loop |
+| A DB connection was held during the whole inference | `session.refresh()` kept the transaction open | Use the `RETURNING` value and commit before inference; refund on failure | Keep transactions short |
+| ★ Credits appeared before the email was confirmed | Credits were given at sign-up | Give them on confirmation, in one `UPDATE … WHERE email_verified = false`, so a second click gets nothing | Grant rewards at the step you actually want to reward |
+| Deleting a guest account returned 422 | FastAPI required a JSON body (password) that guests don't have | `body: PasswordConfirmation \| None = None`, and guests skip the password check | Optional bodies must be declared optional |
+| Anyone with an image's link could open it | Files were served as public static files | `/api/media/...` checks the session and ownership; others get 404 (not 403, which would confirm the file exists) | Unguessable is not the same as private |
+| Adding Alembic to a database that already had tables | Alembic would try to create existing tables | Detect a pre-Alembic database and `stamp` it as the baseline revision; all migrations run in one transaction behind a Postgres advisory lock, so two starting instances can't both migrate | Migrations need a plan for existing data and for concurrency |
+| A 1 GB upload could crash the 512 MB server | `upload.read()` loaded everything before checking the size | `upload.read(limit + 1)` | Check size limits while streaming, not after |
+
+### 15.3 Frontend
+
+| Problem | Why it happened | Fix | Lesson |
+| --- | --- | --- | --- |
+| Scrolling over the editor zoomed **and** scrolled the page | React's `onWheel` is passive, so `preventDefault()` is ignored | Native `addEventListener("wheel", …, { passive: false })` | Know the browser default you are fighting |
+| Dragging the person jumped to the cursor | Position was set to the pointer, ignoring where you grabbed | Store the grab offset at pointer-down | Small details make a UI feel right |
+| 0 credits shown right after confirming the email | The page kept the old user object | Reload `/api/auth/me` after confirming | After a server-side change, refetch the state |
+| The password seemed "remembered" after logout | The browser's password manager, not the app (the app clears its state; verified with Playwright) | Nothing to fix; explained it | Reproduce before you "fix" |
+| Benchmark charts were unreadable on a phone and labels collided | SVG `viewBox` scaled text along with the drawing | Measure the real width (`ResizeObserver`) and draw at that size; labels move above bars on narrow screens; a halo in the card colour keeps the 512 MB line from cutting through text | Test layouts at phone width with screenshots, not by imagination |
+
+### 15.4 Docker, deploy and tooling
+
+| Problem | Why it happened | Fix | Lesson |
+| --- | --- | --- | --- |
+| ★ PyTorch was too heavy for the 512 MB free server | PyTorch + CUDA libraries peaked at 560+ MB | Shrink uploads to ≤ 1600 px, serve with ONNX Runtime (§11): 955 → 463 → 378 MiB, image 1.58 GB → 619 MB | Measure, then fix the biggest cost first |
+| ★ First Render deploy failed: the database refused the connection | I pasted the wrong Neon password into Render's environment | Reset the password in Neon, updated the secret in Render, redeployed. I also added clear startup error logging. | Make startup failures loud and specific |
+| ★ Render killed the deploy: "port scan timeout" | The first start (download the model, run migrations against a cold Neon database) was slower than Render's port check | A redeploy with a warm database worked; startup now logs each step so slowness is visible | Cold starts are real on free tiers |
+| Render's free plan blocks SMTP | Anti-spam policy | Production email goes over Brevo's HTTPS API; SMTP only for the local Mailpit inbox | Read the platform's limits before designing |
+| Brevo warned about sending from a Gmail address | Free-mail senders fail domain checks, so mail may land in spam | Verified the sender, and the site says "check spam" | Email deliverability is its own topic (SPF/DKIM) |
+| Interviewers won't give a real email | Sign-up friction | Guest mode: a temporary confirmed account on the reserved `.invalid` domain, 10 credits, max 5 per IP per day, deleted after 24 h | Design for the actual user, here a busy reviewer |
+| My local tests hit my own "3 sign-ups per IP" limit | All local requests come from one IP | Raised it only in `docker-compose.yml`; production keeps 3 | Configuration per environment |
+| Uploads failed after switching to a non-root container | The old Docker volume was owned by root | `chown` the volume once (new volumes and Render are fine) | Security changes have migration steps too |
+| `scripts/train.py` couldn't import `segmentation` | `src/` layout isn't on the path | `pip install -e .` (scripts also add `src/`) | Package your code properly |
+| Docker permission denied · Vite `ENOSPC` · PyPI timeouts | Docker group, Linux file-watcher limit, slow network | Add user to `docker` group · `VITE_USE_POLLING=true` · `--timeout 90 --retries 5` | Environment problems are normal; write the fix down |
+| Secrets pasted into a chat by accident (database URL) | Copy-paste while debugging | Rotated the password immediately; secrets live only in Render's environment, never in the repo | Treat a leaked secret as burned, rotate it |
 
 ---
 
