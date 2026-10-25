@@ -54,6 +54,17 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
     }
   };
 
+  const tryAsGuest = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      onSignedIn(await api.guest());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Something went wrong. Try again in a moment.");
+      setBusy(false);
+    }
+  };
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault(); // pressing Enter signs in
     void submit("login");
@@ -66,8 +77,8 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
           Cut anyone <CutWord>out</CutWord> of any photo.
         </h1>
         <p className="intro-copy">
-          Upload a photo and get the person on a transparent background, then drop them into any other picture. New accounts get 30 free
-          credits.
+          Upload a photo and get the person on a transparent background, then drop them into any other picture. Confirm your email to get 30 free
+          credits, or try it without an account.
         </p>
       </div>
 
@@ -104,6 +115,15 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
           </button>
           <button className="button secondary wide" type="button" disabled={busy} onClick={() => void submit("register")}>
             Create account
+          </button>
+        </div>
+        <div className="guest-option">
+          <p>
+            <strong>Just looking?</strong> No email needed: get a temporary guest session with 10 credits. It's deleted when you end it,
+            or after 24 hours.
+          </p>
+          <button className="button quiet" type="button" disabled={busy} onClick={() => void tryAsGuest()}>
+            Try it without an account
           </button>
         </div>
         <p className="fine-print">

@@ -84,8 +84,10 @@ export default function App() {
   };
 
   const logout = async () => {
+    const guest = user?.is_guest ?? false;
+    if (guest && !window.confirm("Ending the guest session deletes it and everything you made. Download anything you want to keep first. End it now?")) return;
     await api.logout().catch(() => undefined); // log out locally even if the server is unreachable
-    signOut("You have been logged out.");
+    signOut(guest ? "Your guest session ended and everything in it was deleted." : "You have been logged out.");
   };
 
   const header = (
@@ -129,7 +131,11 @@ export default function App() {
       )}
       {route === "verify" && (
         <div className="page">
-          <VerifyEmailPage signedIn={Boolean(user)} onVerified={() => setUser((current) => current && { ...current, email_verified: true })} />
+          <VerifyEmailPage
+            signedIn={Boolean(user)}
+            // Reload the account: confirming also added the 30 welcome credits on the server.
+            onVerified={() => api.me().then(setUser).catch(() => undefined)}
+          />
         </div>
       )}
       {showAuth && (
@@ -160,6 +166,7 @@ export default function App() {
         <div className="page">
           <HistoryPage
             retentionDays={user.retention_days}
+            isGuest={user.is_guest}
             onApiError={handleApiError}
             onAccountDeleted={() => signOut("Your account and all of its data were deleted.")}
           />

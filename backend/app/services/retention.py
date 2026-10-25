@@ -5,7 +5,8 @@ Policy (also stated on the Privacy page):
 - expired login sessions: deleted
 - failed-login and per-IP records, and expired email links: deleted after 1 day
 - credit ledger rows: deleted after 30 days
-Accounts themselves stay until the user deletes them.
+- guest accounts: deleted after `guest_hours` (24), or when the guest logs out
+Other accounts stay until the user deletes them.
 
 The job runs at every server start and then every `cleanup_interval_minutes` (60) while the
 server is awake. On the free tier the server sleeps when idle, but no new data is created while it
@@ -21,11 +22,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
 
 from backend.app.core.config import settings
-from backend.app.db.models import Composition, CreditTransaction, EmailToken, IpEvent, LoginAttempt, Prediction, SessionToken
+from backend.app.db.models import Composition, CreditTransaction, EmailToken, IpEvent, LoginAttempt, Prediction, SessionToken, User
 from backend.app.db.session import SessionLocal, rows_affected
+from backend.app.services.accounts import folders_of
+from backend.app.services.storage import delete_job_folder
 
 logger = logging.getLogger("human_cutout.retention")
 
@@ -42,6 +45,7 @@ def expiry_of(created_at: datetime) -> datetime:
 
 @dataclass(frozen=True)
 class CleanupReport:
+    guests: int
     predictions: int
     compositions: int
     sessions: int
@@ -62,7 +66,13 @@ def run_cleanup(now: datetime | None = None) -> CleanupReport | None:
         if not session.scalar(text("SELECT pg_try_advisory_xact_lock(:lock_id)"), {"lock_id": CLEANUP_LOCK_ID}):
             return None
         login_cutoff = now - timedelta(days=LOGIN_ATTEMPT_DAYS)
+        # Guest accounts older than guest_hours: their rows go via ON DELETE CASCADE; their files after the commit.
+        expired_guests = list(
+            session.scalars(select(User.id).where(User.is_guest, User.created_at < now - timedelta(hours=settings.guest_hours)))
+        )
+        guest_folders = folders_of(session, expired_guests)
         counts = {
+            "guests": rows_affected(session.execute(delete(User).where(User.id.in_(expired_guests)))) if expired_guests else 0,
             "predictions": rows_affected(session.execute(delete(Prediction).where(Prediction.created_at < cutoff))),
             "compositions": rows_affected(session.execute(delete(Composition).where(Composition.created_at < cutoff))),
             "sessions": rows_affected(session.execute(delete(SessionToken).where(SessionToken.expires_at < now))),
@@ -74,6 +84,8 @@ def run_cleanup(now: datetime | None = None) -> CleanupReport | None:
             ),
         }
         session.commit()
+    for path in guest_folders:
+        delete_job_folder(path)
     return CleanupReport(**counts, folders=delete_old_folders(cutoff))
 
 

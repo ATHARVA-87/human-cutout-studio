@@ -124,7 +124,14 @@ def bucket_tokens(email: str) -> float:
 
 def test_register_gives_welcome_credits_and_duplicate_is_rejected(client) -> None:
     browser, email = new_user(client)
-    assert browser.get("/api/auth/me").json() == {"email": email, "credits": 30, "email_verified": True, "retention_days": 5}
+    assert browser.get("/api/auth/me").json() == {
+        "email": email,
+        "credits": 30,
+        "email_verified": True,
+        "is_guest": False,
+        "retention_days": 5,
+        "guest_hours": 24,
+    }
     assert bucket_tokens(email) == 10
     duplicate = TestClient(app).post("/api/auth/register", json={"email": email.upper(), "password": "password123"})
     assert duplicate.status_code == 409
@@ -507,3 +514,83 @@ def test_images_are_only_visible_to_their_owner(client) -> None:
     assert TestClient(app).get(url).status_code == 401  # nor without signing in
     assert owner.get(url.replace("/cutout", "/../../etc/passwd")).status_code == 404
     assert owner.get("/media/" + str(job_folder(url).name) + "/cutout.png").status_code == 404  # old public path is gone
+
+
+# ---------- guest mode ----------
+
+
+def start_guest() -> TestClient:
+    guest = TestClient(app)
+    response = guest.post("/api/auth/guest")
+    assert response.status_code == 201, response.text
+    return guest
+
+
+def test_guest_can_try_the_app_without_an_email(client) -> None:
+    guest = start_guest()
+    account = guest.get("/api/auth/me").json()
+    assert account["is_guest"] is True and account["email_verified"] is True and account["credits"] == 10
+    assert account["email"].endswith("@guest.invalid")  # reserved domain: can never receive mail
+    assert guest.post("/api/predictions", files={"image": image_file()}).status_code == 201
+    sent_before = len(outbox)
+    TestClient(app).post("/api/auth/forgot-password", json={"email": account["email"]})
+    assert len(outbox) == sent_before  # never emails a guest address
+
+
+def test_ending_a_guest_session_deletes_everything(client) -> None:
+    guest = start_guest()
+    email = guest.get("/api/auth/me").json()["email"]
+    folder = job_folder(segment(guest)["cutout_url"])
+    assert guest.post("/api/auth/logout").status_code == 204
+    assert not folder.exists()
+    with SessionLocal() as session:
+        assert session.query(User).filter_by(email=email).count() == 0
+
+
+def test_guest_can_delete_without_a_password(client) -> None:
+    guest = start_guest()
+    assert guest.request("DELETE", "/api/auth/account").status_code == 204
+    assert guest.get("/api/auth/me").status_code == 401
+
+
+def test_old_guest_accounts_are_cleaned_up(client) -> None:
+    guest = start_guest()
+    email = guest.get("/api/auth/me").json()["email"]
+    folder = job_folder(segment(guest)["cutout_url"])
+    with SessionLocal() as session:
+        session.query(User).filter_by(email=email).update({User.created_at: datetime.now(UTC) - timedelta(hours=25)})
+        session.commit()
+    report = run_cleanup()
+    assert report is not None and report.guests >= 1
+    assert guest.get("/api/auth/me").status_code == 401
+    assert not folder.exists()
+
+
+def test_guest_sessions_are_limited_per_ip(client, monkeypatch) -> None:
+    with SessionLocal() as session:
+        session.query(IpEvent).delete()
+        session.commit()
+    monkeypatch.setattr(settings, "guests_per_ip_per_day", 2)
+    start_guest()
+    start_guest()
+    assert TestClient(app).post("/api/auth/guest").status_code == 429
+
+
+def test_welcome_credits_are_given_when_the_email_is_confirmed(client) -> None:
+    browser, email = new_user(client, verify=False)
+    assert browser.get("/api/auth/me").json()["credits"] == 0  # nothing to spend before confirming
+    assert browser.post("/api/auth/verify-email", json={"token": last_link(email, "verify")}).status_code == 204
+    assert browser.get("/api/auth/me").json()["credits"] == 30
+    # A later password reset also "confirms" the email, but must not give the credits a second time.
+    TestClient(app).post("/api/auth/forgot-password", json={"email": email})
+    TestClient(app).post("/api/auth/reset-password", json={"token": last_link(email, "reset"), "password": "another-password"})
+    fresh = TestClient(app)
+    assert fresh.post("/api/auth/login", json={"email": email, "password": "another-password"}).json()["credits"] == 30
+
+
+def test_password_reset_before_confirming_also_gives_the_credits_once(client) -> None:
+    _, email = new_user(client, verify=False)
+    TestClient(app).post("/api/auth/forgot-password", json={"email": email})
+    TestClient(app).post("/api/auth/reset-password", json={"token": last_link(email, "reset"), "password": "another-password"})
+    account = TestClient(app).post("/api/auth/login", json={"email": email, "password": "another-password"}).json()
+    assert account["email_verified"] is True and account["credits"] == 30

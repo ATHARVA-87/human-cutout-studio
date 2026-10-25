@@ -22,6 +22,8 @@ class User(Base):
     # Set once the user clicks the link in the verification email. Until then they can sign in but not run jobs.
     # server_default=false fills the column for users who existed before it was added (see migration 0003).
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=expression.false())
+    # Temporary guest account (no real email or password); deleted on logout or after `guest_hours`.
+    is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=expression.false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

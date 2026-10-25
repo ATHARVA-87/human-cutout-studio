@@ -52,6 +52,12 @@ export function PrivacyPage() {
       </ul>
       <p>You are never asked for payment details, your location or your contacts, and nothing is read from other websites you visit.</p>
 
+      <p>
+        <strong>Trying it as a guest:</strong> if you choose "Try it without an account", no email or password is collected. You get a
+        temporary account with a random placeholder name. It and everything you make are deleted as soon as you end the guest session, or
+        automatically after 24 hours.
+      </p>
+
       <h2>3. How your information is used</h2>
       <ul>
         <li>To give you what you ask for: signing you in, confirming your email, resetting your password, processing your photos, showing your history and counting your credits.</li>
@@ -90,6 +96,10 @@ export function PrivacyPage() {
           <tr>
             <td>Your account (email, password hash, credit balance)</td>
             <td>Until you delete your account</td>
+          </tr>
+          <tr>
+            <td>A guest session and everything made in it</td>
+            <td>Until you end the session, at most 24 hours</td>
           </tr>
         </tbody>
       </table>

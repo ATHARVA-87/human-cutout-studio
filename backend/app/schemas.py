@@ -19,7 +19,9 @@ class Account(BaseModel):
     email: str
     credits: int
     email_verified: bool  # jobs are allowed only after the email link was clicked
+    is_guest: bool  # temporary account from "Try it without an account"
     retention_days: int  # how long uploads and results are kept (shown in the UI)
+    guest_hours: int  # how long guest accounts last
 
 
 class EmailOnly(BaseModel):

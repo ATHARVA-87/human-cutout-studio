@@ -11,6 +11,7 @@ type Item = Prediction | Composition;
 
 interface HistoryPageProps {
   retentionDays: number;
+  isGuest: boolean;
   onApiError: (caught: unknown) => string | undefined;
   onAccountDeleted: () => void;
 }
@@ -53,7 +54,7 @@ function Thumb({ src, checkerboard = false }: { src: string; checkerboard?: bool
 }
 
 /** Past uploads and results of the signed-in user, newest first, plus account deletion. */
-export function HistoryPage({ retentionDays, onApiError, onAccountDeleted }: HistoryPageProps) {
+export function HistoryPage({ retentionDays, isGuest, onApiError, onAccountDeleted }: HistoryPageProps) {
   const [tab, setTab] = useState<Tab>("cutouts");
   const [predictions, setPredictions] = useState<Page<Prediction>>({ items: [], total: 0 });
   const [compositions, setCompositions] = useState<Page<Composition>>({ items: [], total: 0 });
@@ -203,13 +204,19 @@ export function HistoryPage({ retentionDays, onApiError, onAccountDeleted }: His
         </button>
       )}
 
-      <DeleteAccount onApiError={onApiError} onDeleted={onAccountDeleted} />
+      <DeleteAccount isGuest={isGuest} onApiError={onApiError} onDeleted={onAccountDeleted} />
     </>
   );
 }
 
 /** Permanently delete the account after re-entering the password. */
-function DeleteAccount({ onApiError, onDeleted }: { onApiError: (caught: unknown) => string | undefined; onDeleted: () => void }) {
+interface DeleteAccountProps {
+  isGuest: boolean;
+  onApiError: (caught: unknown) => string | undefined;
+  onDeleted: () => void;
+}
+
+function DeleteAccount({ isGuest, onApiError, onDeleted }: DeleteAccountProps) {
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -217,10 +224,10 @@ function DeleteAccount({ onApiError, onDeleted }: { onApiError: (caught: unknown
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!password) return setError("Enter your password to confirm it's you.");
+    if (!isGuest && !password) return setError("Enter your password to confirm it's you.");
     setBusy(true);
     try {
-      await api.deleteAccount(password);
+      await api.deleteAccount(isGuest ? undefined : password);
       onDeleted();
     } catch (caught) {
       setError(onApiError(caught));
@@ -230,21 +237,25 @@ function DeleteAccount({ onApiError, onDeleted }: { onApiError: (caught: unknown
 
   return (
     <section className="danger-zone" aria-labelledby="delete-account">
-      <h2 id="delete-account">Delete your account</h2>
+      <h2 id="delete-account">{isGuest ? "Delete this guest session" : "Delete your account"}</h2>
       <p className="soft">
         This removes your account, credits and everything you made, right away. It can't be undone. The{" "}
         <a href={href("privacy")}>privacy page</a> explains what is kept about you.
       </p>
       {!open ? (
         <button className="button destructive" onClick={() => setOpen(true)}>
-          Delete my account
+          {isGuest ? "Delete guest session" : "Delete my account"}
         </button>
       ) : (
         <form className="confirm-form" onSubmit={submit}>
-          <label htmlFor="confirm-password" className="small">
-            Enter your password to confirm
-          </label>
-          <PasswordInput id="confirm-password" value={password} onChange={setPassword} />
+          {!isGuest && (
+            <>
+              <label htmlFor="confirm-password" className="small">
+                Enter your password to confirm
+              </label>
+              <PasswordInput id="confirm-password" value={password} onChange={setPassword} />
+            </>
+          )}
           <div className="confirm-actions">
             <button className="button destructive" type="submit" disabled={busy}>
               Delete everything permanently

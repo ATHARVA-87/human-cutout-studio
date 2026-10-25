@@ -86,15 +86,22 @@ def end_session(session: Session, request: Request, response: Response) -> None:
     response.delete_cookie(COOKIE_NAME, path="/")
 
 
-def current_user(request: Request, session: Session = Depends(get_session)) -> User:
-    """FastAPI dependency: the logged-in user, or HTTP 401."""
+def user_from_cookie(session: Session, request: Request) -> User | None:
+    """The user whose valid session cookie came with this request, or None."""
     token = request.cookies.get(COOKIE_NAME)
     if not token:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sign in to continue.")
+        return None
     entry = session.scalar(
         select(SessionToken).where(SessionToken.token_hash == hash_token(token), SessionToken.expires_at > datetime.now(UTC))
     )
-    user = session.get(User, entry.user_id) if entry else None
+    return session.get(User, entry.user_id) if entry else None
+
+
+def current_user(request: Request, session: Session = Depends(get_session)) -> User:
+    """FastAPI dependency: the logged-in user, or HTTP 401."""
+    if not request.cookies.get(COOKIE_NAME):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sign in to continue.")
+    user = user_from_cookie(session, request)
     if user is None:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED, "Your session ended (it expired or you signed in elsewhere). Please sign in again."

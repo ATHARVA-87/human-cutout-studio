@@ -4,6 +4,8 @@ export interface Account {
   email: string;
   credits: number;
   email_verified: boolean; // jobs are allowed only after the link in the verification email is opened
+  is_guest: boolean; // temporary account from "Try it without an account"
+  guest_hours: number; // how long a guest account lasts
   retention_days: number; // uploads and results are deleted after this many days
 }
 

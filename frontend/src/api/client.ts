@@ -44,6 +44,7 @@ export const api = {
   login: (email: string, password: string) => postJson<Account>("/api/auth/login", { email, password }),
   register: (email: string, password: string) => postJson<Account>("/api/auth/register", { email, password }),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+  guest: () => request<Account>("/api/auth/guest", { method: "POST" }),
   recharge: () => request<Account>("/api/auth/recharge", { method: "POST" }),
   verifyEmail: (token: string) => postJson<void>("/api/auth/verify-email", { token }),
   resendVerification: () => request<void>("/api/auth/resend-verification", { method: "POST" }),
@@ -73,6 +74,9 @@ export const api = {
       body: JSON.stringify(placement),
       keepalive: true,
     }),
-  deleteAccount: (password: string) =>
-    request<void>("/api/auth/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) }),
+  // Guests have no password, so they send no body.
+  deleteAccount: (password?: string) =>
+    password === undefined
+      ? request<void>("/api/auth/account", { method: "DELETE" })
+      : request<void>("/api/auth/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) }),
 };

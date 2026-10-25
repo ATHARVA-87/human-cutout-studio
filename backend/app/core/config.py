@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_starttls: bool = False
     brevo_api_key: str = ""
+    # Guest mode ("Try it without an account"): temporary, already-confirmed accounts without an email.
+    guest_credits: int = 10
+    guest_hours: int = 24  # deleted by the cleanup job after this long (or right away when they log out)
+    guests_per_ip_per_day: int = 5
     # Lifetimes of the links sent by email
     verify_token_hours: int = 24
     reset_token_minutes: int = 30

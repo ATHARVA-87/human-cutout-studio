@@ -144,6 +144,17 @@ def record_reset_request(session: Session, ip: str) -> None:
     session.add(IpEvent(ip_hash=ip_hash(ip), kind="reset_request"))
 
 
+def check_guest_allowed(session: Session, ip: str) -> None:
+    window = timedelta(days=1)
+    events = recent_ip_events(session, ip, "guest", datetime.now(UTC) - window)
+    message = "Too many guest sessions from your network today. Sign up with an email instead."
+    enforce_window(events, settings.guests_per_ip_per_day, window, message)
+
+
+def record_guest(session: Session, ip: str) -> None:
+    session.add(IpEvent(ip_hash=ip_hash(ip), kind="guest"))
+
+
 def record_registration(session: Session, ip: str) -> None:
     """Added to the caller's transaction (committed together with the new account)."""
     session.add(IpEvent(ip_hash=ip_hash(ip), kind="register"))

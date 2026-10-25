@@ -65,7 +65,7 @@ export function Header({ user, route, dark, busy = false, onToggleTheme, onRecha
           </button>
           {user && (
             <button className="button quiet" onClick={onLogout} disabled={busy}>
-              Log out
+              {user.is_guest ? "End guest session" : "Log out"}
             </button>
           )}
         </div>

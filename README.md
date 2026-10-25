@@ -13,7 +13,8 @@ A U-Net trained from scratch to separate people from the background, served as a
 - **Person segmentation** (1 credit): binary mask, transparent cutout with soft edges, and a tinted overlay.
 - **Combine with another image** (2 credits): the person is cropped, colour-matched to the new background, and placed in a canvas editor. Drag to move, scroll or use the slider to resize, mirror, and download a PNG. Half-body photos stay glued to the bottom edge; full-body ones get a soft contact shadow.
 - **History**: a separate page lists your past cutouts and compositions (paginated). Open a result again, or reopen a composition **exactly where you left it**: the editor autosaves the position, size and mirroring. Leaving the Create page and coming back keeps your photos and results.
-- **Accounts and credits**: email confirmation before the 30 free credits can be used, "forgot password" by email, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
+- **Try it without an account**: one click gives a temporary guest session (10 credits, no email). It's deleted when you end it, or after 24 hours.
+- **Accounts and credits**: 30 free credits once you confirm your email, "forgot password" by email, demo recharge when you run out, one active session per account, and a rate limit of 10 jobs per 30 minutes per user.
 - **Private images**: every image is served only to its signed-in owner. Anyone else gets 404, even with the exact link.
 - **Privacy by design**: a full [privacy page](frontend/src/pages/PrivacyPage.tsx) written from the user's side. Uploads and results are **deleted automatically after 5 days**. Self-service account deletion. One strictly necessary cookie, no trackers, self-hosted fonts.
 - **Security**: salted password hashing, hashed session tokens, HTTP-only cookies, sign-in limits per account and per network (blocks password guessing and spraying), a sign-up limit per network, per-user access checks, a strict Content Security Policy and security headers, a non-root container, and a request ID on every response.
@@ -139,7 +140,8 @@ SEGMENTATION_DATABASE_URL='postgresql+psycopg://…neon.tech/neondb?sslmode=requ
 | POST | `/api/auth/verify-email` · `/api/auth/resend-verification` | confirm the email with the token from the link / send a new link |
 | POST | `/api/auth/forgot-password` · `/api/auth/reset-password` | email a reset link (same answer for unknown emails) / set a new password with its token |
 | POST | `/api/auth/recharge` | +30 credits, only when below 2 |
-| DELETE | `/api/auth/account` | JSON `{password}`; deletes the account and all its data |
+| DELETE | `/api/auth/account` | JSON `{password}` (guests: no body); deletes the account and all its data |
+| POST | `/api/auth/guest` | start a temporary guest session (max 5 per IP per day) |
 | POST | `/api/predictions` | multipart `image` (JPG/PNG ≤ 10 MB); 1 credit; email must be confirmed |
 | GET | `/api/media/{predictions\|compositions}/{id}/{file}` | the image files, owner-only (401 signed out, 404 for others) |
 | GET | `/api/predictions?limit=&offset=` · `/api/predictions/{id}` | your history only, newest first |

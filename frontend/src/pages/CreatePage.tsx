@@ -46,7 +46,7 @@ function ConfirmEmailBanner({ user, onUserUpdate, onApiError }: Pick<CreatePageP
       <div>
         <strong>Confirm your email to start</strong>
         <p>
-          A confirmation link was sent to {user.email}. Open it to unlock your {user.credits} credits. Check your spam folder if it isn't there.
+          A confirmation link was sent to {user.email}. Open it to get your 30 free credits. Check your spam folder if it isn't there.
         </p>
         {message && <p className="small">{message}</p>}
       </div>
@@ -106,6 +106,17 @@ export function CreatePage({ user, onUserUpdate, busy, setBusy, onCredits, onNee
         <p>Pick what you want, add your photo, and the model finds the person. Results show up on the mat.</p>
       </section>
       {!user.email_verified && <ConfirmEmailBanner user={user} onUserUpdate={onUserUpdate} onApiError={onApiError} />}
+      {user.is_guest && (
+        <div className="confirm-banner" role="status">
+          <div>
+            <strong>You're trying Human Cutout as a guest</strong>
+            <p>
+              This session and everything you make are deleted when you end it, or after {user.guest_hours} hours. Download anything you want
+              to keep, or end the session and create an account with your email.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="workbench">
         <ol className="steps">

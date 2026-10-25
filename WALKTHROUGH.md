@@ -404,6 +404,21 @@ These closed the two biggest product gaps: no way to recover a forgotten passwor
   - `Cache-Control: private`: browsers may cache it, but shared caches (proxies, CDNs) must not.
   - *At scale on AWS:* the same ownership check, then a redirect to a short-lived S3 presigned URL, so the app server doesn't stream the bytes itself.
 
+### 7.12d Guest mode and when credits are given
+- **Why:** interviewers and visitors shouldn't have to hand over an email just to look. With email confirmation required, a made-up address would get stuck, so "use a fake email" wasn't an option.
+- **`POST /api/auth/guest`** creates a real but temporary user:
+  - `is_guest = true` and already `email_verified`;
+  - 10 credits;
+  - an address on the reserved **`.invalid`** domain (RFC 2606: can never receive mail, so nothing is ever emailed);
+  - a random password nobody knows.
+
+  It's limited to 5 per IP per day, plus the normal job rate limit.
+- **Lifetime:**
+  - "End guest session" (logout) **deletes the account immediately**, because a guest could never sign back in anyway.
+  - Otherwise the cleanup job deletes guests older than 24 hours.
+  - Both paths, and "Delete account", use one function (`services/accounts.py → delete_users`): one `DELETE` with `ON DELETE CASCADE`, then the image folders.
+- **Welcome credits now come with email confirmation**, not sign-up. Before, a new account showed 30 credits it couldn't use. `confirm_email()` does `UPDATE users SET email_verified = true, credits = credits + 30 WHERE id = … AND email_verified = false`, one conditional statement. Even if confirmation happens twice (two clicks, or a password reset on an unconfirmed account), the credits are granted **exactly once**.
+
 ### 7.13 Privacy by design ([pages/PrivacyPage.tsx](frontend/src/pages/PrivacyPage.tsx))
 The privacy page ("Your privacy") is written **from the user's side**: "your photos are deleted after 5 days", "you can delete…", with no "we collect…". It reflects how the code actually behaves (an interviewer may check this):
 - **Data minimisation:** store a password *hash*, a token *hash* and an email *hash* for failed logins; log no personal data.
@@ -717,6 +732,8 @@ Numbers follow my original issue list (it had no item 8).
 | – | A forgotten password meant losing the account | No reset flow | Email reset link: hashed, 30-min, single-use token; same answer for unknown emails; signs out everywhere |
 | – | Anyone could sign up with a made-up email | No confirmation | Confirmation link; jobs locked until confirmed |
 | – | Anyone with an image's exact link could open it | Images were public static files | Owner-only `/api/media/...` endpoint (401/404 for others) |
+| – | Interviewers had to give a real email to try it | Email confirmation required | Guest mode: temporary confirmed account, deleted on logout or after 24 h |
+| – | New accounts showed 30 credits before confirming | Credits granted at sign-up | Granted on confirmation, once, with a conditional UPDATE |
 | – | Underline jumped between Create and History | Each link drew its own border | One sliding underline + short page fade |
 | – | Photos and editor lost after visiting History | The Create page unmounted, so React discarded its state | Create page stays mounted (hidden) until sign-out |
 | – | "Edit again" always started from the default position | Placement was never saved | `composition_placements` table + debounced autosave `PUT`, restored on open |
@@ -841,6 +858,8 @@ Lesson for interviews: tests passed before the review too. These were edge cases
 48. *Why confirm emails at all?* It proves the person owns the address (needed before sending reset links to it) and stops credit farming with fake addresses.
 49. *How are images kept private?* They're served by an endpoint that requires the session and checks ownership, returning 404 for others. On AWS it would be the same check plus a short-lived S3 presigned URL.
 50. *Why can't you use SMTP on Render, and what did you do?* The free plan blocks SMTP ports, so production uses Brevo's HTTPS API. The code has interchangeable backends (console, SMTP for the local Mailpit inbox, Brevo).
+51. *How can someone try the app without an email?* Guest mode: a temporary, already-confirmed account on the reserved `.invalid` domain, 10 credits, max 5 per IP per day, deleted on logout or after 24 hours by the cleanup job.
+52. *How do you make sure welcome credits are given only once?* One conditional `UPDATE … WHERE email_verified = false` sets the flag and adds the credits; a second attempt matches 0 rows.
 
 ---
 
