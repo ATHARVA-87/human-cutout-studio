@@ -47,7 +47,7 @@ OUTPUT = PROJECT_ROOT / "frontend" / "src" / "data" / "benchmark.json"
 MEAN, STD = np.array([0.485, 0.456, 0.406], np.float32), np.array([0.229, 0.224, 0.225], np.float32)
 COCO_PERSON, VOC_PERSON = 1, 15
 SERVER_LIMIT_MB = 512  # Render free plan
-SERVER_PEAK_WITH_OURS_MB = 378  # measured peak of the deployed server (production container, docs: WALKTHROUGH section 11)
+SERVER_PEAK_WITH_OURS_MB = 378  # measured peak of the deployed server (production container)
 ONNX_MODELS = {"ours": "model.onnx", "resnet34_unet": "baseline_resnet34_unet.onnx"}  # served with ONNX Runtime
 
 MODELS = {

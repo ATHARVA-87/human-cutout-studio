@@ -51,7 +51,7 @@ What it shows:
 - **A small specialist beats a giant generalist on one narrow task.** Mine is more accurate than detector + SAM, 64× faster and 14× lighter in memory.
 - **Edges need in-domain training.** DeepLabV3 matches my Dice but has much rougher outlines.
 
-Reproduce with `pip install -e '.[benchmark]'`, `python scripts/train_pretrained_baseline.py`, then `python scripts/benchmark_models.py`. Method and caveats are in [WALKTHROUGH.md §5.7](WALKTHROUGH.md#57-how-it-compares-the-benchmark-scriptsbenchmark_modelspy-pagesmodelpagetsx).
+Reproduce with `pip install -e '.[benchmark]'`, `python scripts/train_pretrained_baseline.py`, then `python scripts/benchmark_models.py`. The method and caveats are on the [Model page](https://human-cutout-n6b5.onrender.com/#/model).
 
 ## How it works
 
@@ -194,7 +194,7 @@ Dockerfile · docker-compose.yml · render.yaml · .github/workflows/ci.yml · a
 
 ## Deployment
 
-`render.yaml` describes the production service: the Docker image runs on Render's free plan, the database is a free Neon PostgreSQL, `model.onnx` is downloaded from the Hugging Face Hub during the build, and emails are sent through Brevo's free HTTPS API (Render's free plan blocks SMTP ports). Pushing to `main` runs CI, and Render deploys only when CI passes. Step-by-step instructions are in [WALKTHROUGH.md](WALKTHROUGH.md#13-deploying-for-free-step-by-step).
+`render.yaml` describes the production service: the Docker image runs on Render's free plan, the database is a free Neon PostgreSQL, `model.onnx` is downloaded from the Hugging Face Hub during the build, and emails are sent through Brevo's free HTTPS API (Render's free plan blocks SMTP ports). Pushing to `main` runs CI, and Render deploys only when CI passes.
 
 ## Limitations
 
