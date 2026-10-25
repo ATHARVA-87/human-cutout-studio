@@ -12,6 +12,81 @@ interface Placement {
 interface LoadedImages {
   background: HTMLImageElement;
   cutout: HTMLImageElement;
+  shadow: Shadow;
+}
+
+/**
+ * Contact shadow, prepared once per cutout in the cutout's own pixel coordinates (so drawing it while the
+ * user drags is just two drawImage calls). `soft` and `contact` are two layers drawn with different blur.
+ */
+interface Shadow {
+  soft: HTMLCanvasElement;
+  contact: HTMLCanvasElement;
+  heightRatio: number; // layer height / cutout height (the layers reach a little below the person)
+}
+
+// part: how much of the body above the contact point casts the shadow; flat: its squashed height;
+// above: how much of that sits above the contact point (hidden behind the person) vs. below it (visible).
+const SHADOW_LAYERS = [
+  { part: 0.3, flat: 0.06, above: 0.35 }, // soft shadow
+  { part: 0.08, flat: 0.022, above: 0.5 }, // thin dark line right where the body touches the ground
+];
+
+/**
+ * Build the shadow from the person's own silhouette, one thin vertical slice at a time. Each slice takes
+ * the part of the body just above its lowest solid pixel, squashes it flat and puts it right there. So
+ * the shadow follows the body where it meets the ground: under the feet of someone standing, under the
+ * hips and feet of someone sitting, along the body of someone lying down. Slices that end far above the
+ * lowest point (like hanging arms) fade out, so they don't cast floating shadows.
+ */
+function prepareShadow(cutout: HTMLImageElement): Shadow {
+  const W = cutout.naturalWidth;
+  const H = cutout.naturalHeight;
+  const heightRatio = 1.06;
+  const makeCanvas = (width: number, height: number) => Object.assign(document.createElement("canvas"), { width, height });
+  const layers = [makeCanvas(W, Math.round(H * heightRatio)), makeCanvas(W, Math.round(H * heightRatio))];
+  const [soft, contact] = layers;
+
+  // A black copy of the person (keep the shape, replace the colours).
+  const silhouette = makeCanvas(W, H);
+  const paint = silhouette.getContext("2d");
+  // The lowest solid pixel of every column, found on a small copy (at most 200 px tall) so it's fast.
+  const scale = Math.min(1, 200 / H);
+  const w = Math.max(1, Math.round(W * scale));
+  const h = Math.max(1, Math.round(H * scale));
+  const small = makeCanvas(w, h).getContext("2d", { willReadFrequently: true });
+  if (!paint || !small) return { soft, contact, heightRatio };
+  paint.drawImage(cutout, 0, 0);
+  paint.globalCompositeOperation = "source-in";
+  paint.fillRect(0, 0, W, H);
+  small.drawImage(cutout, 0, 0, w, h);
+  const alpha = small.getImageData(0, 0, w, h).data;
+  const columnBottom = Array.from({ length: w }, (_, x) => {
+    for (let y = h - 1; y >= 0; y--) if (alpha[(y * w + x) * 4 + 3] > 128) return y + 1;
+    return -1; // empty column
+  });
+  const ground = Math.max(...columnBottom);
+  if (ground <= 0) return { soft, contact, heightRatio };
+
+  layers.forEach((layer, index) => {
+    const context = layer.getContext("2d");
+    if (!context) return;
+    const { part, flat, above } = SHADOW_LAYERS[index];
+    columnBottom.forEach((bottom, x) => {
+      if (bottom < 0) return;
+      // Full strength within 3% of the person's height from the lowest point, gone at 20%.
+      const strength = Math.min(1, Math.max(0, (0.2 - (ground - bottom) / h) / 0.17));
+      if (strength === 0) return;
+      const sourceX = x / scale;
+      const sliceWidth = 1 / scale;
+      const sourceBottom = bottom / scale;
+      const sourceTop = Math.max(0, sourceBottom - part * H);
+      const flatHeight = flat * H;
+      context.globalAlpha = strength;
+      context.drawImage(silhouette, sourceX, sourceTop, sliceWidth, sourceBottom - sourceTop, sourceX, sourceBottom - flatHeight * above, sliceWidth + 0.5, flatHeight);
+    });
+  });
+  return { soft, contact, heightRatio };
 }
 
 const MIN_HEIGHT = 0.05; // fraction of the background height
@@ -28,7 +103,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 /** Start at a believable size: about 70% of the scene height, never wider than 90% of it. */
-function initialPlacement({ background, cutout }: LoadedImages, anchorBottom: boolean): Placement {
+function initialPlacement({ background, cutout }: Omit<LoadedImages, "shadow">, anchorBottom: boolean): Placement {
   const aspect = cutout.naturalWidth / cutout.naturalHeight;
   const height = Math.min(background.naturalHeight * (anchorBottom ? 0.6 : 0.7), (background.naturalWidth * 0.9) / aspect);
   const bottom = anchorBottom ? background.naturalHeight : background.naturalHeight * 0.92;
@@ -72,7 +147,7 @@ export function Composer({ item, onSaved }: ComposerProps) {
     Promise.all([loadImage(item.background_url), loadImage(item.cutout_url)])
       .then(([background, cutout]) => {
         if (cancelled) return;
-        setImages({ background, cutout });
+        setImages({ background, cutout, shadow: prepareShadow(cutout) });
         // Continue where the user left off, if this composition was edited before.
         setPlace(item.placement ? fromSaved(item.placement, background) : initialPlacement({ background, cutout }, item.anchor_bottom));
         setMirrored(item.placement?.mirrored ?? false);
@@ -89,21 +164,25 @@ export function Composer({ item, onSaved }: ComposerProps) {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context || !images || !place) return;
-    const { background, cutout } = images;
+    const { background, cutout, shadow } = images;
     canvas.width = background.naturalWidth;
     canvas.height = background.naturalHeight;
     context.drawImage(background, 0, 0);
 
     const width = place.height * (cutout.naturalWidth / cutout.naturalHeight);
     if (!item.anchor_bottom) {
-      // Soft contact shadow under the feet, so a full-body person looks like they stand on the ground.
-      context.save();
-      context.filter = `blur(${Math.max(2, width * 0.04)}px)`;
-      context.fillStyle = "rgba(0, 0, 0, 0.35)";
-      context.beginPath();
-      context.ellipse(place.x, place.bottom - place.height * 0.01, width * 0.35, Math.max(3, place.height * 0.025), 0, 0, Math.PI * 2);
-      context.fill();
-      context.restore();
+      // Contact shadow (see prepareShadow), placed and mirrored with the same transform as the person.
+      const layer = (canvas: HTMLCanvasElement, blur: number, opacity: number) => {
+        context.save();
+        context.filter = `blur(${Math.max(1, place.height * blur)}px)`;
+        context.globalAlpha = opacity;
+        context.translate(place.x, 0);
+        context.scale(mirrored ? -1 : 1, 1);
+        context.drawImage(canvas, -width / 2, place.bottom - place.height, width, place.height * shadow.heightRatio);
+        context.restore();
+      };
+      layer(shadow.soft, 0.012, 0.45);
+      layer(shadow.contact, 0.004, 0.6);
     }
     context.save();
     context.translate(place.x, 0);

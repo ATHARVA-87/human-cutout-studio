@@ -593,7 +593,7 @@ login_attempts                       (email_hash + created_at; no foreign key: a
   - `setPointerCapture` keeps the drag working even if the pointer leaves the canvas.
 - **Wheel zoom:** React registers wheel listeners as *passive*, which means `preventDefault()` is ignored, so the page scrolled while zooming. I attach a native listener with `{ passive: false }` on the canvas only: inside the canvas it zooms, outside it scrolls the page.
 - **Half-body (`anchor_bottom`):** the person is glued to the bottom edge, and only horizontal drag is allowed.
-- **Full-body:** a soft blurred shadow ellipse is drawn under the feet first.
+- **Full-body:** a contact shadow, built from the person's own silhouette, is drawn first (see §10, step 5).
 - **Download:** `canvas.toDataURL("image/png")`, which is exactly what you see.
 
 **Theme.** Colours are CSS variables (`--page`, `--text`, `--mat`, …) defined twice, under `[data-theme="dark"]` and `[data-theme="light"]`. Components only use the variables, so switching theme is one attribute change. Secondary buttons always have white text. The logo is dark green in light mode. `transition: color/background-color .3s` makes the switch smooth.
@@ -642,7 +642,14 @@ The goal is light realism with no extra AI model, just Pillow + NumPy ([services
    - For each channel, shift the person's mean and standard deviation toward the background's, at **50% strength**. A full transfer over-tints skin.
    - The std ratio is clamped to 0.5–2 to avoid extreme contrast.
    - Detail: Pillow stores LAB's a/b channels as *signed* bytes, so values above 127 are really negative. `_to_lab` unwraps them.
-5. **Contact shadow** (frontend). A blurred dark ellipse under full-body people.
+5. **Contact shadow** (frontend, `prepareShadow` in [Composer.tsx](frontend/src/components/Composer.tsx)). Built once per cutout from the person's own silhouette, one thin vertical slice at a time:
+   - each slice takes the body just above its lowest solid pixel, squashes it flat and places it **right at that pixel**;
+   - so the shadow follows where the body meets the ground: under the feet when standing, under the hips, hand and feet when sitting, along the body when lying;
+   - slices that end far above the lowest point (like hanging arms) fade out, so they don't cast floating shadows;
+   - two layers (a soft one and a thin dark contact line) are pre-drawn in the cutout's coordinates, so dragging only costs two `drawImage` calls;
+   - mirroring uses the same transform as the person.
+
+   *Before:* one blurred ellipse centred under the image box. It floated below sitting or lying people and missed feet that weren't centred.
 
 **What it can't do:** fix perspective (camera height/angle), light direction, or hard shadows. That would need 3D understanding or a generative model. Hosted relighting APIs exist, but they cost money per image, add latency, and would hide my own model's work.
 
@@ -855,6 +862,7 @@ Interviewers love "tell me about a problem you solved". Each entry says what wen
 | Dragging the person jumped to the cursor | Position was set to the pointer, ignoring where you grabbed | Store the grab offset at pointer-down | Small details make a UI feel right |
 | 0 credits shown right after confirming the email | The page kept the old user object | Reload `/api/auth/me` after confirming | After a server-side change, refetch the state |
 | The password seemed "remembered" after logout | The browser's password manager, not the app (the app clears its state; verified with Playwright) | Nothing to fix; explained it | Reproduce before you "fix" |
+| The merge shadow floated away from the person | It was one ellipse centred under the image box, at its bottom edge; sitting/lying people or off-centre feet don't match that | Build it from the silhouette: each vertical slice casts its shadow at its own lowest pixel; slices far above the ground fade out (§10) | Derive effects from the data (the mask), not from the bounding box |
 | Benchmark charts were unreadable on a phone and labels collided | SVG `viewBox` scaled text along with the drawing | Measure the real width (`ResizeObserver`) and draw at that size; labels move above bars on narrow screens; a halo in the card colour keeps the 512 MB line from cutting through text | Test layouts at phone width with screenshots, not by imagination |
 
 ### 15.4 Docker, deploy and tooling
